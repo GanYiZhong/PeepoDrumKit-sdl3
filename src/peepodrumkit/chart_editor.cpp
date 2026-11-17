@@ -73,6 +73,10 @@ namespace PeepoDrumKit
 		return Audio::SoundAPI::Auto;
 	}
 
+	// NOTE: Course whose tab should be selected as soon as the course tab bar has been submitted.
+	//		 Needed because a freshly (re)populated Dear ImGui tab bar always selects its first tab, which would otherwise override the selection
+	static const ChartCourse* ForceSelectCourseTab = nullptr;
+
 	ChartEditor::ChartEditor()
 	{
 #ifdef __EMSCRIPTEN__
@@ -712,7 +716,8 @@ namespace PeepoDrumKit
 								GetStyleName(course->Style, course->PlayerSide).data(),
 								course.get());
 							const b8 isSelected = (course.get() == context.ChartSelectedCourse);
-							const b8 setSelectedThisFrame = (isSelected && course.get() != lastFrameSelectedCoursePtrID);
+							const b8 isForcedTab = (ForceSelectCourseTab == course.get());
+							const b8 setSelectedThisFrame = isForcedTab || (isSelected && course.get() != lastFrameSelectedCoursePtrID);
 
 							Gui::PushID(course.get());
 
@@ -732,8 +737,12 @@ namespace PeepoDrumKit
 							if (Gui::BeginTabItem(buffer, nullptr, setSelectedThisFrame ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None))
 							{
 								// TODO: Selecting a course should also be an undo command so that there isn't ever any confusion (?)
-								context.SetSelectedChart(course.get(), BranchType::Normal);
-								lastFrameSelectedCoursePtrID = context.ChartSelectedCourse;
+								if (ForceSelectCourseTab == nullptr || isForcedTab)
+								{
+									context.SetSelectedChart(course.get(), BranchType::Normal);
+									lastFrameSelectedCoursePtrID = context.ChartSelectedCourse;
+									ForceSelectCourseTab = nullptr;
+								}
 								isAnyCourseTabSelected = true;
 								Gui::EndTabItem();
 							}
@@ -787,7 +796,11 @@ namespace PeepoDrumKit
 							Gui::PopID();
 						}
 
-						if (!isAnyCourseTabSelected)
+						// NOTE: Don't keep waiting for a course that no longer exists
+						if (ForceSelectCourseTab != nullptr && std::none_of(context.Chart.Courses.begin(), context.Chart.Courses.end(), [](const auto& it) { return it.get() == ForceSelectCourseTab; }))
+							ForceSelectCourseTab = nullptr;
+
+						if (!isAnyCourseTabSelected && ForceSelectCourseTab == nullptr)
 						{
 							assert(!context.Chart.Courses.empty() && "Courses must never be empty so that the selected course always points to a valid object");
 							context.SetSelectedChart(context.Chart.Courses.front().get(), BranchType::Normal);
@@ -1097,6 +1110,12 @@ namespace PeepoDrumKit
 		if (Gui::Begin(UI_WindowName("TAB_TIMELINE_DEBUG"))) { /* ... */ } Gui::End();
 #endif
 
+#ifdef __EMSCRIPTEN__
+		// NOTE: The web build starts with the game preview tab in front (instead of the usage guide), then hands keyboard focus to the timeline
+		static i32 webStartupFocusFrames = 3;
+		if (webStartupFocusFrames > 0)
+			Gui::SetNextWindowFocus();
+#endif
 		if (Gui::Begin(UI_WindowName("TAB_GAME_PREVIEW"), nullptr, ImGuiWindowFlags_None))
 		{
 			gamePreview.DrawGui(context, timeline.Camera.WorldSpaceXToTime(timeline.WorldSpaceCursorXAnimationCurrent));
@@ -1104,6 +1123,10 @@ namespace PeepoDrumKit
 		Gui::End();
 
 		// NOTE: Always update the timeline even if the window isn't visible so that child-windows can be docked properly and hit sounds can always be heard
+#ifdef __EMSCRIPTEN__
+		if (webStartupFocusFrames > 0 && --webStartupFocusFrames == 0)
+			Gui::SetNextWindowFocus();
+#endif
 		Gui::Begin(UI_WindowName("TAB_TIMELINE"), nullptr, ImGuiWindowFlags_None);
 		timeline.DrawGui(context);
 		Gui::End();
@@ -1720,11 +1743,28 @@ namespace PeepoDrumKit
 			context.Chart = std::move(loadResult.Chart);
 			context.ChartFilePath = std::move(loadResult.ChartFilePath);
 			context.ResetChartsCompared();
+#ifdef __EMSCRIPTEN__
+			// NOTE: The web build opens the highest regular difficulty (Ura > Oni > Hard > ...) instead of whichever course comes first in the file.
+			//		 Tower / Dan courses are only picked if there is nothing else, ties go to the first course (e.g. the 1P side of a double chart)
+			ChartCourse* courseToSelect = context.Chart.Courses.empty() ? nullptr : context.Chart.Courses.front().get();
+			for (const auto& course : context.Chart.Courses)
+			{
+				const b8 isRegular = (course->Type <= DifficultyType::OniUra);
+				const b8 selectedIsRegular = (courseToSelect->Type <= DifficultyType::OniUra);
+				if ((isRegular && !selectedIsRegular) || (isRegular && course->Type > courseToSelect->Type))
+					courseToSelect = course.get();
+			}
+			context.SetSelectedChart(
+				(courseToSelect != nullptr) ? courseToSelect : context.Chart.Courses.emplace_back(std::make_unique<ChartCourse>()).get(),
+				BranchType::Normal);
+			ForceSelectCourseTab = context.ChartSelectedCourse;
+#else
 			context.SetSelectedChart(
 				context.Chart.Courses.empty() ?
 					context.Chart.Courses.emplace_back(std::make_unique<ChartCourse>()).get()
 					: context.Chart.Courses.front().get(),
 				BranchType::Normal);
+#endif
 			StartAsyncLoadingSongAudioFile(Path::TryMakeAbsolute(context.Chart.SongFileName, context.ChartFilePath));
 			StartAsyncLoadingSongJacketFile(Path::TryMakeAbsolute(context.Chart.SongJacket, context.ChartFilePath));
 

@@ -69,6 +69,8 @@ Open the page, then use the editor like the desktop version:
   ("Audio file … not found — Choose audio file") lets you add the song afterwards. File name case and sub folders in `WAVE:` don't matter.
 - **File → Save / Save As** (Ctrl+S) downloads the chart as a UTF-8 `.tja` (or hands it to the host page, see below).
 - Click the editor once before using keyboard shortcuts; keys only go to the editor while its canvas has focus.
+- Two defaults differ from the desktop build: an opened chart starts on its **highest difficulty** (Ura > Oni > Hard > …) rather than
+  the first course in the file, and the **Game Preview** tab is in front at startup instead of the usage guide.
 
 ## Embedding API
 
