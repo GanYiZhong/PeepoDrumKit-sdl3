@@ -111,7 +111,7 @@ All functions live on `Module.pdk` (`web/pdk_api.js`):
 | `pdk.newChart()`, `pdk.isLoading()`, `pdk.saveSettings()` | |
 | `pdk.onReady`, `pdk.onTitleChange = (title) => {}` | Optional callbacks. Without `onTitleChange` the editor sets `document.title`. |
 | `pdk.onMissingAudio = (waveName) => {}` | A chart was opened without the audio file its `WAVE:` header refers to (answer with `pdk.loadAudio`). |
-| `Module.pdkOptions` | Set before loading the script: `persistSettings`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle`, `missingAudioPrompt` (all default `true`). |
+| `Module.pdkOptions` | Set before loading the script: `persistSettings`, `persistCharts`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle`, `missingAudioPrompt` (all default `true`). |
 
 The same things are exported as plain C functions (`_pdk_web_open_chart`, `_pdk_web_get_tja`, …, see
 `src/peepodrumkit/chart_editor_web.cpp`) for anyone who prefers `ccall`.

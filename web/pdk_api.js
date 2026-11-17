@@ -174,10 +174,10 @@
   }
 
   // Runs the callback once the editor has finished loading the chart (relative paths are resolved against the loaded chart)
+  // NOTE: Deliberately without a timeout: loading only progresses while the browser renders frames, which a background tab may not do for minutes
   function whenNotLoading(callback) {
-    var attempts = 0;
     (function poll() {
-      if (!Module._pdk_web_is_loading() || ++attempts > 600) callback();
+      if (!Module._pdk_web_is_loading()) callback();
       else setTimeout(poll, 50);
     })();
   }
@@ -402,20 +402,16 @@
       if (chart.audio != null) writeWorkFile(chart.audioName || findWaveName(tjaText) || "song.ogg", toUint8Array(chart.audio));
 
       var tjaPath = writeWorkFile(tjaName, tjaBytes);
-      resolveChartAudio(tjaPath);
+      // Only look for (or ask for) the WAVE: file when the caller didn't pass the audio itself
+      if (chart.audio == null) resolveChartAudio(tjaPath);
+      else hideMissingAudioBanner();
       callWithString("pdk_web_open_chart", tjaPath, [chart.discardUnsavedChanges === false ? 0 : 1]);
 
       // The chart's own WAVE: header wins when the names match; otherwise point the (now loading) chart at the given audio
       // (skipped when the editor may still be showing its "save changes?" popup, the audio file is available next to the chart either way)
       if (chart.discardUnsavedChanges !== false && chart.audio != null && chart.audioName && sanitizeFileName(chart.audioName) !== sanitizeFileName(findWaveName(tjaText))) {
         var audioPath = WORK_DIR + "/" + sanitizeFileName(chart.audioName);
-        var attempts = 0;
-        var timer = setInterval(function () {
-          if (!Module._pdk_web_is_loading() || ++attempts > 600) {
-            clearInterval(timer);
-            callWithString("pdk_web_load_audio", audioPath);
-          }
-        }, 50);
+        whenNotLoading(function () { callWithString("pdk_web_load_audio", audioPath); });
       }
       return tjaPath;
     },
@@ -459,7 +455,8 @@
     if (options.persistSettings === false) return;
     try {
       FS.mount(IDBFS, {}, PERSIST_DIR);
-      FS.mount(IDBFS, {}, WORK_DIR);
+      // persistCharts: false keeps opened charts in memory only (for hosts that store the charts themselves)
+      if (options.persistCharts !== false) FS.mount(IDBFS, {}, WORK_DIR);
       addRunDependency("pdk-idbfs");
       FS.syncfs(true, function (error) {
         if (error) console.warn("[PeepoDrumKit] settings could not be restored", error);
