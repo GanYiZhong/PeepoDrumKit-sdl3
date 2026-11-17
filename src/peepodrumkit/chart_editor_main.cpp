@@ -274,5 +274,20 @@ extern "C"
 {
 	// NOTE: A browser tab never shuts down cleanly, so the page calls this periodically / when it gets hidden (followed by an IndexedDB sync)
 	EMSCRIPTEN_KEEPALIVE void pdk_web_save_settings(void) { PeepoDrumKit::WebSaveSettings(); }
+
+	// NOTE: Newline separated "recent files" paths as a malloc()-ed string the caller has to free().
+	//		 Used by the page to decide which of the charts kept in IndexedDB are still needed
+	EMSCRIPTEN_KEEPALIVE char* pdk_web_get_recent_files(void)
+	{
+		// NOTE: Charts that weren't stored (or got replaced) can't be reopened, so don't list them either
+		auto& recentPaths = PeepoDrumKit::PersistentApp.RecentFiles.SortedPaths;
+		recentPaths.erase(std::remove_if(recentPaths.begin(), recentPaths.end(), [](const std::string& path) { return !File::Exists(path); }), recentPaths.end());
+
+		std::string joined;
+		for (const std::string& path : PeepoDrumKit::PersistentApp.RecentFiles.SortedPaths) { joined += path; joined += '\n'; }
+		char* out = static_cast<char*>(::malloc(joined.size() + 1));
+		if (out != nullptr) { ::memcpy(out, joined.data(), joined.size()); out[joined.size()] = '\0'; }
+		return out;
+	}
 }
 #endif // __EMSCRIPTEN__

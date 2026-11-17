@@ -136,9 +136,12 @@ Compared to the desktop build:
 - **Audio latency.** Output goes through SDL3 → Web Audio (a `ScriptProcessorNode` on the main thread, since `AudioWorklet` would need
   threads). The buffer is at least 1024 frames (~45 ms total); the *buffer size* and *exclusive mode* settings have no effect, there is no
   device selection, and audio can crackle while the tab is busy or in the background. Browsers only start audio after the first click or key press.
-- **Files live in memory.** There is no access to the real file system: opening = upload into memory, saving = download (or `onSave`).
-  "Save" can't overwrite the original file, the `.tja.bak` backup the desktop build writes next to the chart is not downloaded,
-  "Open chart directory" does nothing, and the *recent files* list is meaningless after a reload.
+- **No access to the real file system.** Opening = copying the files into the browser, saving = download (or `onSave`).
+  "Save" can't overwrite the original file, the `.tja.bak` backup the desktop build writes next to the chart is not downloaded and
+  "Open chart directory" does nothing. Opened charts and their audio are kept in the browser's IndexedDB so that
+  **File → Open Recent** works after a reload (it reopens the browser's copy, including what was last saved, not the file on disk);
+  only the charts on that list are kept, two different charts with the same file name replace each other, and nothing is kept
+  in private windows or with `pdkOptions.persistSettings = false`.
 - **Shift-JIS is decode-only** (via `TextDecoder`); like the desktop build, charts are always saved as UTF-8. BOM-less UTF-8 charts are
   detected and opened as UTF-8 (the desktop build treats them as Shift-JIS).
 - **Browser-reserved shortcuts** such as Ctrl+N, Ctrl+T and Ctrl+W can't be intercepted; use the menu (or rebind them in the settings) instead.

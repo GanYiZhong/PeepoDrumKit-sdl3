@@ -1,4 +1,7 @@
 ﻿#include "chart_editor.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "core_build_info.h"
 #include "chart_editor_undo.h"
 #include "chart_editor_widgets.h"
@@ -1491,6 +1494,9 @@ namespace PeepoDrumKit
 			context.Undo.ClearChangesWereMade();
 
 			PersistentApp.RecentFiles.Add(std::string { filePath });
+#ifdef __EMSCRIPTEN__
+			EM_ASM({ Module.pdkInternal.schedulePersist(); });
+#endif
 		}
 	}
 
@@ -1532,6 +1538,10 @@ namespace PeepoDrumKit
 			importChartFuture.get();
 
 		PersistentApp.RecentFiles.Add(std::string { absoluteChartFilePath });
+#ifdef __EMSCRIPTEN__
+		// NOTE: Store the updated recent files list (and the chart itself) in IndexedDB so that it survives a page reload
+		EM_ASM({ Module.pdkInternal.schedulePersist(); });
+#endif
 		importChartFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [tempPathCopy = std::string(absoluteChartFilePath)]() mutable->AsyncImportChartResult
 		{
 			AsyncImportChartResult result {};

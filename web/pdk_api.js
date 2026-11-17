@@ -65,7 +65,48 @@
     try { FS.mkdir(WORK_DIR); } catch (e) { /* already exists */ }
     var path = WORK_DIR + "/" + sanitizeFileName(name);
     FS.writeFile(path, bytes);
+    schedulePersist();
     return path;
+  }
+
+  // Opened charts (and their audio) are kept in IndexedDB so that "File > Open Recent" still works after a reload.
+  // Debounced: writes the settings (which contain the recent files list) and flushes both to IndexedDB.
+  var persistTimer = 0;
+  function schedulePersist() {
+    if (options.persistSettings === false) return;
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(saveSettings, 1500);
+  }
+
+  // Deletes everything in /work that isn't a recent chart or a file such a chart refers to, so that the storage doesn't grow forever
+  function pruneWorkDirectory() {
+    var pointer = Module._pdk_web_get_recent_files();
+    var recent = pointer ? Module.UTF8ToString(pointer).split("\n").filter(Boolean) : [];
+    if (pointer) Module._free(pointer);
+
+    var keep = {};
+    recent.forEach(function (tjaPath) {
+      if (tjaPath.indexOf(WORK_DIR + "/") !== 0 || !pathExists(tjaPath)) return;
+      keep[tjaPath] = keep[tjaPath + ".bak"] = true;
+      try {
+        var waveName = findWaveName(decodeTJABytes(FS.readFile(tjaPath)));
+        if (!waveName) return;
+        var wavePath = WORK_DIR + "/" + waveName.replace(/\\/g, "/");
+        keep[wavePath] = true;
+      } catch (e) { /* unreadable chart, keep just the file itself */ }
+    });
+
+    var removedAny = false;
+    (function visit(directory) {
+      FS.readdir(directory).forEach(function (name) {
+        if (name === "." || name === "..") return;
+        var path = directory + "/" + name;
+        var mode = FS.lstat(path).mode;
+        if (FS.isDir(mode)) { visit(path); try { FS.rmdir(path); } catch (e) { /* not empty */ } }
+        else if (!keep[path]) { FS.unlink(path); removedAny = true; }
+      });
+    })(WORK_DIR);
+    if (removedAny) schedulePersist();
   }
 
   function callWithString(functionName, string, extraArgs) {
@@ -192,6 +233,7 @@
             // The file the chart asked for: put it where the chart expects it, the chart itself stays unchanged
             FS.mkdirTree(expectedPath.substring(0, expectedPath.lastIndexOf("/")));
             FS.writeFile(expectedPath, bytes);
+            schedulePersist();
             // (passed exactly as written in the chart so that its WAVE: header is left untouched)
             loadAudioKeepingSavedState(waveName);
           } else {
@@ -221,15 +263,16 @@
     if (pathExists(expectedPath)) return;
 
     // The virtual file system is case sensitive and flat, unlike the folder the chart came from:
-    // accept "Song.OGG" for "song.ogg" and "song.ogg" for "audio/song.ogg" by linking it to the expected path
+    // accept "Song.OGG" for "song.ogg" and "song.ogg" for "audio/song.ogg" by moving it to the expected path
     var wanted = baseNameKey(waveName);
     var candidates = FS.readdir(WORK_DIR).filter(function (name) { return name !== "." && name !== ".." && baseNameKey(name) === wanted; });
     if (candidates.length > 0) {
       try {
         FS.mkdirTree(expectedPath.substring(0, expectedPath.lastIndexOf("/")));
-        FS.symlink(WORK_DIR + "/" + candidates[0], expectedPath);
+        FS.rename(WORK_DIR + "/" + candidates[0], expectedPath);
+        schedulePersist();
         return;
-      } catch (e) { console.warn("[PeepoDrumKit] could not link the audio file", e); }
+      } catch (e) { console.warn("[PeepoDrumKit] could not move the audio file", e); }
     }
     showMissingAudioBanner(waveName, expectedPath);
   }
@@ -244,7 +287,10 @@
   // Hooks called from C++
   // ------------------------------------------------------------------------------------------------------------------
   Module.pdkInternal = {
+    schedulePersist: function () { schedulePersist(); },
+
     onReady: function () {
+      try { pruneWorkDirectory(); } catch (e) { console.warn("[PeepoDrumKit] could not clean up stored charts", e); }
       readyResolve(Module.pdk);
       if (typeof Module.pdk.onReady === "function") Module.pdk.onReady(Module.pdk);
     },
@@ -291,6 +337,7 @@
     onWorkFileWritten: function (path) {
       var bytes = FS.readFile(path);
       var fileName = path.substring(path.lastIndexOf("/") + 1);
+      schedulePersist();
       if (extensionOf(fileName) === "tja") {
         var text = decodeTJABytes(bytes);
         if (typeof Module.pdk.onSave === "function") { Module.pdk.onSave(text, fileName); return; }
@@ -412,6 +459,7 @@
     if (options.persistSettings === false) return;
     try {
       FS.mount(IDBFS, {}, PERSIST_DIR);
+      FS.mount(IDBFS, {}, WORK_DIR);
       addRunDependency("pdk-idbfs");
       FS.syncfs(true, function (error) {
         if (error) console.warn("[PeepoDrumKit] settings could not be restored", error);
