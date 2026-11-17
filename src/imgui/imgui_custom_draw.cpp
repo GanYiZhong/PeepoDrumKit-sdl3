@@ -18,6 +18,98 @@ struct WAVEFORM_CONSTANT_BUFFER
 	float Amplitudes[CustomDraw::WaveformPixelsPerChunk];
 };
 
+#ifdef __EMSCRIPTEN__
+#include <SDL3/SDL_opengles2.h>
+#include <vector>
+
+// NOTE: Web build, plain WebGL2 textures used together with the Dear ImGui OpenGL3 backend (ImTextureID == GL texture name)
+namespace CustomDraw
+{
+	static void UploadPixelsToBoundTexture(GPUPixelFormat format, ivec2 size, const void* pixels, b8 isNewTexture)
+	{
+		// NOTE: WebGL has no BGRA upload format so the channels have to be swapped on the CPU
+		static std::vector<u8> swapBuffer;
+		const void* pixelsToUpload = pixels;
+		if (format == GPUPixelFormat::BGRA && pixels != nullptr)
+		{
+			const size_t byteCount = static_cast<size_t>(size.x) * static_cast<size_t>(size.y) * 4;
+			swapBuffer.resize(byteCount);
+			const u8* in = static_cast<const u8*>(pixels);
+			for (size_t i = 0; i < byteCount; i += 4)
+			{
+				swapBuffer[i + 0] = in[i + 2];
+				swapBuffer[i + 1] = in[i + 1];
+				swapBuffer[i + 2] = in[i + 0];
+				swapBuffer[i + 3] = in[i + 3];
+			}
+			pixelsToUpload = swapBuffer.data();
+		}
+
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		if (isNewTexture)
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size.x, size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixelsToUpload);
+		else
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, pixelsToUpload);
+	}
+
+	void GPUTexture::Load(const GPUTextureDesc &desc)
+	{
+		if (this->GLTexture != 0)
+			Unload();
+
+		GLint lastTexture = 0;
+		glGetIntegerv(GL_TEXTURE_BINDING_2D, &lastTexture);
+
+		GLuint texture = 0;
+		glGenTextures(1, &texture);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		// NOTE: Nearest filtering to match the SDL_GPU sampler used by the desktop build
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		UploadPixelsToBoundTexture(desc.Format, desc.Size, desc.InitialPixels, true);
+		glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(lastTexture));
+
+		this->GLTexture = texture;
+		this->Size = desc.Size;
+		this->Format = desc.Format;
+		this->Access = desc.Access;
+	}
+
+	void GPUTexture::Unload()
+	{
+		if (this->GLTexture != 0)
+		{
+			GLuint texture = this->GLTexture;
+			glDeleteTextures(1, &texture);
+		}
+		this->GLTexture = 0;
+		this->Access = GPUAccessType::Static;
+		this->Size = ivec2(0, 0);
+		this->Format = GPUPixelFormat::RGBA;
+	}
+
+	void GPUTexture::UpdateDynamic(ivec2 size, const void *newPixels)
+	{
+		if (this->GLTexture == 0 || newPixels == nullptr)
+			return;
+
+		GLint lastTexture = 0;
+		glGetIntegerv(GL_TEXTURE_BINDING_2D, &lastTexture);
+		glBindTexture(GL_TEXTURE_2D, this->GLTexture);
+		UploadPixelsToBoundTexture(this->Format, size, newPixels, (size != this->Size));
+		glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(lastTexture));
+		this->Size = size;
+	}
+
+	b8 GPUTexture::IsValid() const { return this->GLTexture != 0; }
+	ivec2 GPUTexture::GetSize() const { return this->Size; }
+	vec2 GPUTexture::GetSizeF32() const { return vec2(GetSize()); }
+	GPUPixelFormat GPUTexture::GetFormat() const { return this->Format; }
+	ImTextureID GPUTexture::GetTexID() const { return (ImTextureID)(intptr_t)this->GLTexture; }
+}
+#else // __EMSCRIPTEN__
 // TODO: Reimplement these on SDL3/SDL_GPU backend
 namespace CustomDraw
 {
@@ -123,6 +215,11 @@ namespace CustomDraw
 	vec2 GPUTexture::GetSizeF32() const { return vec2(GetSize()); }
 	GPUPixelFormat GPUTexture::GetFormat() const { return this->Format; }
 	ImTextureID GPUTexture::GetTexID() const { return (ImTextureID)(intptr_t)&this->Binding; }
+}
+#endif // __EMSCRIPTEN__
+
+namespace CustomDraw
+{
 	void DrawWaveformChunk(ImDrawList *drawList, Rect rect, u32 color, const WaveformChunk &chunk)
 	{
 		// Render waveform using a triangle strip (connected quads)

@@ -30,15 +30,21 @@ namespace ImGui
 
 	void UpdateSmoothScrollWindow(ImGuiWindow* window, f32 animationSpeed)
 	{
+		window = (window == nullptr) ? ImGui::GetCurrentWindowRead() : window;
+#if UINTPTR_MAX == 0xFFFFFFFFu
+		// NOTE: 32-bit pointers (wasm32 web build) can't hold both floats in a single void* slot, so use two separate float slots instead
+		f32& scrollYTarget = *window->StateStorage.GetFloatRef(ImGui::GetID("SmoothScrollStorageTarget"));
+		f32& scrollYCurrentLastFrame = *window->StateStorage.GetFloatRef(ImGui::GetID("SmoothScrollStorageLastFrame"));
+#else
 		struct VoidPtrStorage { f32 ScrollYTarget, ScrollYLastFrame; };
 		static_assert(sizeof(void*) == sizeof(VoidPtrStorage));
 
-		window = (window == nullptr) ? ImGui::GetCurrentWindowRead() : window;
 		auto* storage = reinterpret_cast<VoidPtrStorage*>(window->StateStorage.GetVoidPtrRef(ImGui::GetID("SmoothScrollStorage")));
 		if (storage == nullptr) { assert(false); return; }
 
 		f32& scrollYTarget = storage->ScrollYTarget;
 		f32& scrollYCurrentLastFrame = storage->ScrollYLastFrame;
+#endif
 		f32& scrollYCurrent = window->Scroll.y;
 		AnimateExponential(&scrollYCurrent, scrollYTarget, animationSpeed);
 

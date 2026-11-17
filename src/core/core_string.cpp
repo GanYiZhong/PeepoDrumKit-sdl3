@@ -1,6 +1,8 @@
 #include "core_string.h"
 #include <charconv>
+#include <cassert>
 #include <vector>
+#ifndef __EMSCRIPTEN__
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 #include <unicode/ucnv.h>
@@ -101,6 +103,70 @@ static std::wstring UTF8ToWide(std::string_view utf8)
 	}
 }
 
+#else // __EMSCRIPTEN__
+#include <emscripten.h>
+
+// NOTE: The web build doesn't link ICU (its data tables alone would add ~30 MB to the download).
+//		 UTF-8 <-> wide conversions are done by hand and Shift-JIS is delegated to the browser's TextDecoder
+static std::string WideToUTF8(std::wstring_view input)
+{
+	std::string out;
+	out.reserve(input.size() * 3);
+	for (size_t i = 0; i < input.size(); i++)
+	{
+		uint32_t c = static_cast<uint32_t>(input[i]);
+		if (sizeof(wchar_t) == 2 && c >= 0xD800 && c <= 0xDBFF && (i + 1) < input.size())
+		{
+			const uint32_t low = static_cast<uint32_t>(input[i + 1]);
+			if (low >= 0xDC00 && low <= 0xDFFF) { c = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00); i++; }
+		}
+		if (c < 0x80) { out += static_cast<char>(c); }
+		else if (c < 0x800) { out += static_cast<char>(0xC0 | (c >> 6)); out += static_cast<char>(0x80 | (c & 0x3F)); }
+		else if (c < 0x10000) { out += static_cast<char>(0xE0 | (c >> 12)); out += static_cast<char>(0x80 | ((c >> 6) & 0x3F)); out += static_cast<char>(0x80 | (c & 0x3F)); }
+		else { out += static_cast<char>(0xF0 | (c >> 18)); out += static_cast<char>(0x80 | ((c >> 12) & 0x3F)); out += static_cast<char>(0x80 | ((c >> 6) & 0x3F)); out += static_cast<char>(0x80 | (c & 0x3F)); }
+	}
+	return out;
+}
+
+static std::wstring UTF8ToWide(std::string_view utf8)
+{
+	std::wstring out;
+	out.reserve(utf8.size());
+	for (size_t i = 0; i < utf8.size();)
+	{
+		const uint8_t b0 = static_cast<uint8_t>(utf8[i]);
+		uint32_t c = 0xFFFD; size_t length = 1;
+		if (b0 < 0x80) { c = b0; }
+		else if ((b0 & 0xE0) == 0xC0) { length = 2; c = (b0 & 0x1F); }
+		else if ((b0 & 0xF0) == 0xE0) { length = 3; c = (b0 & 0x0F); }
+		else if ((b0 & 0xF8) == 0xF0) { length = 4; c = (b0 & 0x07); }
+		if (i + length > utf8.size()) { out += static_cast<wchar_t>(0xFFFD); break; }
+		for (size_t j = 1; j < length; j++) c = (c << 6) | (static_cast<uint8_t>(utf8[i + j]) & 0x3F);
+		i += length;
+		if (sizeof(wchar_t) == 2 && c >= 0x10000)
+		{
+			c -= 0x10000;
+			out += static_cast<wchar_t>(0xD800 + (c >> 10));
+			out += static_cast<wchar_t>(0xDC00 + (c & 0x3FF));
+		}
+		else
+		{
+			out += static_cast<wchar_t>(c);
+		}
+	}
+	return out;
+}
+
+// NOTE: Returns a malloc()-ed null terminated UTF-8 string that has to be free()-d by the caller
+EM_JS(char*, PeepoWebDecodeShiftJIS, (const char* inData, int inSize), {
+	var text = "";
+	try { text = new TextDecoder("shift_jis").decode(HEAPU8.subarray(inData, inData + inSize)); }
+	catch (e) { console.error("[PeepoDrumKit] Shift-JIS decoding failed", e); }
+	return stringToNewUTF8(text);
+});
+
+#endif // __EMSCRIPTEN__
+
 namespace UTF8
 {
 	std::string Narrow(std::wstring_view utf16Input)
@@ -115,8 +181,17 @@ namespace UTF8
 
 	std::string FromShiftJIS(std::string_view shiftJISInput)
 	{
+#ifdef __EMSCRIPTEN__
+		if (shiftJISInput.empty())
+			return {};
+		char* decoded = PeepoWebDecodeShiftJIS(shiftJISInput.data(), static_cast<int>(shiftJISInput.size()));
+		std::string result = (decoded != nullptr) ? std::string(decoded) : std::string();
+		::free(decoded);
+		return result;
+#else
 		// Convert Shift_JIS bytes -> wide -> UTF-8
 		return UTF8::Narrow(ShiftJIS::Widen(shiftJISInput));
+#endif
 	}
 
 	WideArg::WideArg(std::string_view utf8Input)
@@ -149,6 +224,7 @@ namespace UTF8
 	}
 }
 
+#ifndef __EMSCRIPTEN__
 namespace ShiftJIS
 {
 	// NOTE: According to https://docs.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
@@ -206,6 +282,15 @@ namespace ShiftJIS
 		return out;
 	}
 }
+#else // __EMSCRIPTEN__
+namespace ShiftJIS
+{
+	// NOTE: Browsers can only *decode* Shift-JIS. Encoding isn't needed by the editor (charts are always saved as UTF-8)
+	std::string Narrow(std::wstring_view utf16Input) { assert(!"Shift-JIS encoding is not supported in the web build"); return {}; }
+	std::wstring Widen(std::string_view shiftJISInput) { return UTF8::Widen(UTF8::FromShiftJIS(shiftJISInput)); }
+	std::string FromUTF8(std::string_view utf8Input) { assert(!"Shift-JIS encoding is not supported in the web build"); return {}; }
+}
+#endif // __EMSCRIPTEN__
 
 namespace ASCII
 {

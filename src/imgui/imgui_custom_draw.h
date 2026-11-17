@@ -35,7 +35,12 @@ namespace CustomDraw
 		GPUPixelFormat Format;
 		GPUAccessType Access;
 		ivec2 Size;
+#ifdef __EMSCRIPTEN__
+		// NOTE: WebGL2 texture name, 0 if not loaded
+		u32 GLTexture;
+#else
 		SDL_GPUTextureSamplerBinding Binding;
+#endif
 
 		void Load(const GPUTextureDesc &desc);
 		void Unload();

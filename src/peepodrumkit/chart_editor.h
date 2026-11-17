@@ -41,6 +41,11 @@ namespace PeepoDrumKit
 		std::string JacketFilePath;
 	};
 
+#ifdef __EMSCRIPTEN__
+	struct ChartEditor;
+	void WebRegisterChartEditorInstance(ChartEditor* instance);
+#endif
+
 	struct ChartEditor
 	{
 	public:
@@ -74,6 +79,19 @@ namespace PeepoDrumKit
 
 		void CheckOpenSaveConfirmationPopupThenCall(std::function<void()> onSuccess);
 		void InternalUpdateAsyncLoading();
+
+#ifdef __EMSCRIPTEN__
+	public:
+		// NOTE: Web build only, used by the JS host integration (see "chart_editor_web.cpp")
+		void WebOpenChartFile(std::string_view filePath, b8 discardUnsavedChanges);
+		void WebLoadAudioFile(std::string_view filePath);
+		std::string WebGetChartAsTJAText() const;
+		b8 WebHasUnsavedChanges() const;
+		void WebMarkAsSaved();
+		void WebNewChart();
+		void WebSaveChart();
+		b8 WebIsLoading() const;
+#endif
 
 	private:
 		ChartContext context = {};

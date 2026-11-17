@@ -85,6 +85,26 @@ namespace Audio
 	};
 #endif // __APPLE__
 
+#ifdef __EMSCRIPTEN__
+	class SDL3Backend : public IAudioBackend
+	{
+	public:
+		SDL3Backend();
+		~SDL3Backend();
+
+	public:
+		b8 OpenStartStream(const BackendStreamParam &param, BackendRenderCallback callback) override;
+		b8 StopCloseStream() override;
+		b8 IsOpenRunning() const override;
+
+		u32 GetVariantCount() const override;
+		cstr GetVariantName(u32 index) const override;
+
+	private:
+		struct Impl;
+		std::unique_ptr<Impl> impl;
+	};
+#else // __EMSCRIPTEN__
 	class LibSoundIOBackend : public IAudioBackend
 	{
 	public:
@@ -103,4 +123,5 @@ namespace Audio
 		struct Impl;
 		std::unique_ptr<Impl> impl;
 	};
+#endif // __EMSCRIPTEN__
 }

@@ -15,6 +15,9 @@ namespace Audio
 	static std::unique_ptr<IAudioBackend> CreateBackendInterface(Backend backend)
 	{
 
+#if defined(__EMSCRIPTEN__)
+		return std::make_unique<SDL3Backend>();
+#else
 #ifdef _WIN32
 		return std::make_unique<WASAPIBackend>();
 #elif defined(__APPLE__)
@@ -22,6 +25,7 @@ namespace Audio
 #endif
 		// Use LibSoundIO as fallback/default
 		return std::make_unique<LibSoundIOBackend>();
+#endif
 	}
 
 	using VoiceFlags = u16;
@@ -574,7 +578,7 @@ namespace Audio
 
 	std::future<SourceHandle> AudioEngine::LoadSourceFromFileAsync(std::string_view filePath)
 	{
-		return std::async(std::launch::async, [this, pathCopy = std::string(filePath)] { return LoadSourceFromFileSync(pathCopy); });
+		return std::async(PEEPO_ASYNC_LAUNCH_POLICY, [this, pathCopy = std::string(filePath)] { return LoadSourceFromFileSync(pathCopy); });
 	}
 
 	SourceHandle AudioEngine::LoadSourceFromFileSync(std::string_view filePath)

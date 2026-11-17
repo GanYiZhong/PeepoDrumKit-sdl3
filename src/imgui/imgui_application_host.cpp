@@ -1,4 +1,6 @@
-﻿#include "imgui_application_host.h"
+﻿// NOTE: Desktop (SDL3 + SDL_GPU) application host, the web build uses "imgui_application_host_web.cpp" instead
+#ifndef __EMSCRIPTEN__
+#include "imgui_application_host.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -375,3 +377,5 @@ namespace ApplicationHost
 		return SDL_EnterAppMainCallbacks(0, nullptr, SDL_AppInit, SDL_AppIterate, SDL_AppEvent, SDL_AppQuit);
 	}
 }
+
+#endif // !__EMSCRIPTEN__

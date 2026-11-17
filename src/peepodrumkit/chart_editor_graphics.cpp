@@ -162,7 +162,7 @@ namespace PeepoDrumKit
 	{
 		assert(!Data->LoadFuture.valid());
 		Data->FinishedLoading = false;
-		Data->LoadFuture = std::async(std::launch::async, [this]()
+		Data->LoadFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [this]()
 									  {
 #if PEEPO_DEBUG // DEBUG: ...
 			auto sw = CPUStopwatch::StartNew();

@@ -7,7 +7,7 @@ namespace PeepoDrumKit
 	void SoundEffectsVoicePool::StartAsyncLoadingAndAddVoices()
 	{
 		assert(!LoadSoundEffectFuture.valid());
-		LoadSoundEffectFuture = std::async(std::launch::async, []() -> AsyncLoadSoundEffectsResult
+		LoadSoundEffectFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, []() -> AsyncLoadSoundEffectsResult
 		{
 			AsyncLoadSoundEffectsResult result {};
 			for (size_t i = 0; i < EnumCount<SoundEffectType>; i++)

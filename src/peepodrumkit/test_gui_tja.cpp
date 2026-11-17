@@ -150,7 +150,7 @@ namespace PeepoDrumKit
 		{
 			if (ASCII::EndsWithInsensitive(droppedFilePath, ".tja"))
 			{
-				LoadTJAFuture = std::async(std::launch::async, [pathCopy = droppedFilePath] { ParsedAndConvertedTJAFile tja; tja.LoadFromFile(pathCopy); return tja; });
+				LoadTJAFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [pathCopy = droppedFilePath] { ParsedAndConvertedTJAFile tja; tja.LoadFromFile(pathCopy); return tja; });
 				break;
 			}
 		}

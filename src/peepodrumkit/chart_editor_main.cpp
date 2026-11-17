@@ -111,6 +111,22 @@ namespace PeepoDrumKit
 		return LoadSettingsResponse::ErrorAbort;
 	}
 
+	static void SaveSettingsIniFiles()
+	{
+		std::string iniFileContent;
+		iniFileContent.reserve(4096);
+		SettingsToIni(PersistentApp, iniFileContent);
+		File::WriteAllBytes(PersistentAppIniFileName, iniFileContent);
+
+		if (Settings.IsDirty)
+		{
+			iniFileContent.clear();
+			SettingsToIni(Settings, iniFileContent);
+			File::WriteAllBytes(SettingsIniFileName, iniFileContent);
+			Settings_Mutable.IsDirty = false;
+		}
+	}
+
 	int EntryPoint()
 	{
 		// TODO: Parse arguments and write into global argv settings struct
@@ -123,6 +139,12 @@ namespace PeepoDrumKit
 			Directory::SetWorkingDirectory(resourceDir);
 		else
 			Directory::SetWorkingDirectory(Directory::GetExecutableDirectory());
+
+#ifdef __EMSCRIPTEN__
+		// NOTE: Settings are written relative to the working directory, which for the web build should be the IndexedDB backed "/persist"
+		if (Path::IsDirectory("/persist"))
+			Directory::SetWorkingDirectory("/persist");
+#endif
 
 		std::cout << "Working Directory: " << Directory::GetWorkingDirectory() << std::endl;
 		std::cout << "Resource Directory: " << Directory::GetResourceDirectory() << std::endl;
@@ -226,18 +248,7 @@ namespace PeepoDrumKit
 			PersistentApp.LastSession.OSWindow_IsFullscreen = ApplicationHost::GlobalState.IsBorderlessFullscreen;
 			// TODO: PersistentApp.LastSession.OSWindow_IsMaximized = ...;
 
-			std::string iniFileContent;
-			iniFileContent.reserve(4096);
-			SettingsToIni(PersistentApp, iniFileContent);
-			File::WriteAllBytes(PersistentAppIniFileName, iniFileContent);
-
-			if (Settings.IsDirty)
-			{
-				iniFileContent.clear();
-				SettingsToIni(Settings, iniFileContent);
-				File::WriteAllBytes(SettingsIniFileName, iniFileContent);
-				Settings_Mutable.IsDirty = false;
-			}
+			SaveSettingsIniFiles();
 		};
 		callbacks.OnWindowCloseRequest = []
 		{
@@ -247,3 +258,21 @@ namespace PeepoDrumKit
 		return ApplicationHost::EnterProgramLoop(startupParam, callbacks);
 	}
 }
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+namespace PeepoDrumKit
+{
+	void WebSaveSettings()
+	{
+		PersistentApp.LastSession.GuiScale = GuiScaleFactorTarget;
+		PersistentApp.LastSession.GuiLanguage = SelectedGuiLanguage;
+		SaveSettingsIniFiles();
+	}
+}
+extern "C"
+{
+	// NOTE: A browser tab never shuts down cleanly, so the page calls this periodically / when it gets hidden (followed by an IndexedDB sync)
+	EMSCRIPTEN_KEEPALIVE void pdk_web_save_settings(void) { PeepoDrumKit::WebSaveSettings(); }
+}
+#endif // __EMSCRIPTEN__

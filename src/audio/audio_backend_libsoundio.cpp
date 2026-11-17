@@ -1,3 +1,5 @@
+// NOTE: libsoundio is not available for the web build, see "audio_backend_sdl3.cpp" instead
+#ifndef __EMSCRIPTEN__
 #include "audio_backend.h"
 #include "audio_common.h"
 
@@ -302,3 +304,5 @@ namespace Audio
 		return (index < 2) ? names[index] : "Invalid";
 	}
 }
+
+#endif // !__EMSCRIPTEN__

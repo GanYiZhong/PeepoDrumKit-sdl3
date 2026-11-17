@@ -75,6 +75,9 @@ namespace PeepoDrumKit
 
 	ChartEditor::ChartEditor()
 	{
+#ifdef __EMSCRIPTEN__
+		WebRegisterChartEditorInstance(this);
+#endif
 		context.Gfx.StartAsyncLoading();
 		context.SongVoice = Audio::Engine.AddVoice(Audio::SourceHandle::Invalid, "ChartEditor SongVoice", false, 1.0f, 0, true);
 		context.SfxVoicePool.StartAsyncLoadingAndAddVoices();
@@ -107,6 +110,9 @@ namespace PeepoDrumKit
 
 	ChartEditor::~ChartEditor()
 	{
+#ifdef __EMSCRIPTEN__
+		WebRegisterChartEditorInstance(nullptr);
+#endif
 		context.SfxVoicePool.UnloadAllSourcesAndVoices();
 	}
 
@@ -1503,7 +1509,7 @@ namespace PeepoDrumKit
 			importChartFuture.get();
 
 		PersistentApp.RecentFiles.Add(std::string { absoluteChartFilePath });
-		importChartFuture = std::async(std::launch::async, [tempPathCopy = std::string(absoluteChartFilePath)]() mutable->AsyncImportChartResult
+		importChartFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [tempPathCopy = std::string(absoluteChartFilePath)]() mutable->AsyncImportChartResult
 		{
 			AsyncImportChartResult result {};
 			result.ChartFilePath = std::move(tempPathCopy);
@@ -1542,7 +1548,7 @@ namespace PeepoDrumKit
 		if (loadJacketFuture.valid())
 			loadJacketFuture.get();
 
-		loadJacketFuture = std::async(std::launch::async, [tempPathCopy = std::string(absoluteJacketFilePath)]() ->AsyncLoadJacketResult
+		loadJacketFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [tempPathCopy = std::string(absoluteJacketFilePath)]() ->AsyncLoadJacketResult
 			{
 				AsyncLoadJacketResult result{};
 				result.JacketFilePath = std::move(tempPathCopy);
@@ -1565,7 +1571,7 @@ namespace PeepoDrumKit
 
 		context.SongWaveformFadeAnimationTarget = 0.0f;
 		loadSongStopwatch.Restart();
-		loadSongFuture = std::async(std::launch::async, [tempPathCopy = std::string(absoluteAudioFilePath)]()->AsyncLoadSongResult
+		loadSongFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [tempPathCopy = std::string(absoluteAudioFilePath)]()->AsyncLoadSongResult
 		{
 			AsyncLoadSongResult result {};
 			result.SongFilePath = std::move(tempPathCopy);

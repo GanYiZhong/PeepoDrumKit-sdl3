@@ -13,6 +13,20 @@
 #include <unistd.h>
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+// NOTE: Web build virtual file system layout:
+//		 "/app"     -> read only preloaded resources (assets, locales)
+//		 "/persist" -> settings, backed by IndexedDB (also the working directory)
+//		 "/work"    -> in-memory charts and audio files that were opened via the browser or passed in by the host page
+namespace WebFS
+{
+	static constexpr std::string_view ResourceDirectory = "/app";
+	static constexpr std::string_view WorkDirectoryPrefix = "/work/";
+}
+#endif
+
 namespace Path
 {
 	static constexpr std::string_view Win32RootDirectoryPrefix = "\\";
@@ -164,7 +178,18 @@ namespace File
 		if (filePath.empty() || fileContent == nullptr)
 			return false;
 
+#ifdef __EMSCRIPTEN__
+		const std::string filePathNullTerminated { filePath };
+		if (!SDL_SaveFile(filePathNullTerminated.c_str(), fileContent, fileSize))
+			return false;
+
+		// NOTE: Files "saved" by the user only exist in memory, so hand them over to the page (which either passes them to the host or starts a download)
+		if (filePath.starts_with(WebFS::WorkDirectoryPrefix))
+			EM_ASM({ Module.pdkInternal.onWorkFileWritten(UTF8ToString($0)); }, filePathNullTerminated.c_str());
+		return true;
+#else
 		return SDL_SaveFile(filePath.data(), fileContent, fileSize);
+#endif
 	}
 
 	b8 WriteAllBytes(std::string_view filePath, const UniqueFileContent &uniqueFileContent)
@@ -262,7 +287,11 @@ namespace Directory
 
 	std::string GetExecutableDirectory()
 	{
+#ifdef __EMSCRIPTEN__
+		return std::string(WebFS::ResourceDirectory);
+#else
 		return std::filesystem::path(GetExecutablePath()).parent_path().string();
+#endif
 	}
 	
 	std::string GetResourceDirectory()
@@ -291,6 +320,11 @@ namespace Shell
 	{
 		if (filePath.empty())
 			return;
+
+#ifdef __EMSCRIPTEN__
+		// NOTE: There is no file explorer for the in-memory virtual file system
+		return;
+#endif
 
 		std::string pathString{ filePath };
 
@@ -370,6 +404,69 @@ namespace Shell
 		Folder
 	};
 
+#ifdef __EMSCRIPTEN__
+	// NOTE: Browser replacement for native file dialogs:
+	//		 Open -> <input type="file"> whose files get copied into "/work"
+	//		 Save -> immediately "picks" a path inside "/work", writing to it then notifies the page (see File::WriteAllBytes())
+	static FileDialog* WebPendingOpenDialog = nullptr;
+	static std::string WebDialogOutFilePath;
+
+	static b8 CreateAndShowFileDialog(FileDialog &dialog, DialogType dialogType, DialogPickType pickType)
+	{
+		if (pickType == DialogPickType::Folder)
+		{
+			printf("Folder dialogs are not supported in the web build.\n");
+			return false;
+		}
+
+		if (dialogType == DialogType::Save)
+		{
+			std::string fileName { dialog.InFileName.empty() ? std::string_view("Untitled") : dialog.InFileName };
+			for (char& c : fileName) { if (c == '/' || c == '\\' || c == ':') c = '_'; }
+			if (!dialog.InDefaultExtension.empty() && !Path::HasExtension(fileName, dialog.InDefaultExtension))
+			{
+				if (dialog.InDefaultExtension.front() != '.')
+					fileName += '.';
+				fileName += dialog.InDefaultExtension;
+			}
+
+			Directory::Create("/work");
+			WebDialogOutFilePath = std::string(WebFS::WorkDirectoryPrefix) + fileName;
+			dialog.OutFilePath = WebDialogOutFilePath.c_str();
+			if (dialog.onCallback)
+				dialog.onCallback(FileDialogResult::OK);
+			return true;
+		}
+
+		// NOTE: Packed as "ext;ext;ext" for the JS side, empty meaning any
+		std::string packedExtensions;
+		for (const auto &filter : dialog.InFilters)
+		{
+			if (filter.Spec == AllFilesFilterSpec)
+				continue;
+			if (!packedExtensions.empty())
+				packedExtensions += ';';
+			packedExtensions += filter.Spec;
+		}
+
+		WebPendingOpenDialog = &dialog;
+		EM_ASM({ Module.pdkInternal.openFileDialog(UTF8ToString($0)); }, packedExtensions.c_str());
+		return true;
+	}
+
+	void WebOnFileDialogResult(const char* filePathUTF8)
+	{
+		FileDialog* dialog = WebPendingOpenDialog;
+		WebPendingOpenDialog = nullptr;
+		if (dialog == nullptr)
+			return;
+
+		WebDialogOutFilePath = (filePathUTF8 != nullptr) ? filePathUTF8 : "";
+		dialog->OutFilePath = WebDialogOutFilePath.c_str();
+		if (dialog->onCallback)
+			dialog->onCallback(WebDialogOutFilePath.empty() ? FileDialogResult::Cancel : FileDialogResult::OK);
+	}
+#else // __EMSCRIPTEN__
 	static void SDL_DialogCallback(void *userdata, const char *const *filelist, int filter)
 	{
 		auto dialog = reinterpret_cast<FileDialog *>(userdata);
@@ -450,8 +547,20 @@ namespace Shell
 
 		return true;
 	}
+#endif // __EMSCRIPTEN__
 
 	b8 FileDialog::OpenRead() { return CreateAndShowFileDialog(*this, DialogType::Open, DialogPickType::File); }
 	b8 FileDialog::OpenSave() { return CreateAndShowFileDialog(*this, DialogType::Save, DialogPickType::File); }
 	b8 FileDialog::OpenSelectFolder() { return CreateAndShowFileDialog(*this, DialogType::Open, DialogPickType::Folder); }
 }
+
+#ifdef __EMSCRIPTEN__
+extern "C"
+{
+	// NOTE: Called from JS after the files picked via an <input type="file"> have been written into "/work" (or with null on cancel)
+	EMSCRIPTEN_KEEPALIVE void pdk_web_file_dialog_result(const char* filePathUTF8)
+	{
+		Shell::WebOnFileDialogResult(filePathUTF8);
+	}
+}
+#endif // __EMSCRIPTEN__

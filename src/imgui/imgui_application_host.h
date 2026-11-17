@@ -106,4 +106,9 @@ namespace ApplicationHost
 	};
 
 	i32 EnterProgramLoop(const StartupParam& startupParam, UserCallbacks userCallbacks);
+
+#ifdef __EMSCRIPTEN__
+	// NOTE: Web build only. Treat a file inside the Emscripten virtual file system as if it had been dropped onto the window
+	void WebQueueDroppedFilePath(std::string_view filePath);
+#endif
 }

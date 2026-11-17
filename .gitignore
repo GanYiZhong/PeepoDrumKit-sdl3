@@ -354,3 +354,8 @@ settings_imgui.ini
 settings_app.ini
 
 .vscode/
+
+# Web (Emscripten) build: fetched dependencies, object cache and output
+web/deps/
+web/build/
+web/dist/

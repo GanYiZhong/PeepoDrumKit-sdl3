@@ -14,6 +14,8 @@
 #include <array>
 #include <string_view>
 #include <future>
+#include <atomic>
+#include <atomic>
 #include <chrono>
 
 #if !defined(sprintf_s)
@@ -32,9 +34,21 @@
 #define strcat_s(dest, src) strncat((dest), (src), sizeof(dest) - strlen(dest) - 1)
 #endif
 
+// NOTE: The web (Emscripten) build is single threaded so that it doesn't require SharedArrayBuffer (COOP / COEP headers).
+//		 "Async" tasks are therefore deferred and then run synchronously on the main thread the first time they're polled
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+#define PEEPO_ASYNC_LAUNCH_POLICY std::launch::deferred
+#else
+#define PEEPO_ASYNC_LAUNCH_POLICY std::launch::async
+#endif
+
 template<typename R>
   bool future_is_ready(std::future<R> const& f)
-  { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }
+  {
+    const std::future_status status = f.wait_for(std::chrono::seconds(0));
+    if (status == std::future_status::deferred) { f.wait(); return true; }
+    return status == std::future_status::ready;
+  }
   
 using i8 = int8_t;
 using u8 = uint8_t;
