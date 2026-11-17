@@ -322,6 +322,9 @@ namespace PeepoDrumKit::i18n
 	void InitBuiltinLocale();
 	void RefreshLocales();
 	void ReloadLocaleFile(cstr languageId = "en");
+	// NOTE: Translation of a free form English string via the [Text] section of the current locale file.
+	//		 Returns the input itself if there is no translation, the result stays valid until the locale is reloaded
+	cstr Tr(cstr englishText);
 	void ExportBuiltinLocaleFiles();
 	cstr HashToString(u32 inHash);
 

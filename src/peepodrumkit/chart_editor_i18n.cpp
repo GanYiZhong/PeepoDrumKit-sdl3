@@ -4,6 +4,9 @@
 namespace PeepoDrumKit::i18n
 {
 	static std::unordered_map<u32, std::string> HashStringMap;
+	// NOTE: Translations of strings that aren't part of the X-macro key list, looked up by (the hash of) their English text.
+	//		 Filled from the optional [Text] section of a locale file, see Tr()
+	static std::unordered_map<u32, std::string> TextStringMap;
 	static std::shared_mutex HashStringMapMutex;
 	std::string SelectedFontName = "NotoSansCJKjp-Regular.otf";
 	std::vector<LocaleEntry> LocaleEntries;
@@ -12,6 +15,7 @@ namespace PeepoDrumKit::i18n
 	{
 		FontMainFileNameTarget = FontMainFileNameDefault;
 		HashStringMap.clear();
+		TextStringMap.clear();
 
 #define X(key, en) HashStringMap[Hash(key)] = std::string(en);
 		PEEPODRUMKIT_UI_STRINGS_X_MACRO_LIST_EN
@@ -125,6 +129,30 @@ namespace PeepoDrumKit::i18n
 		HashStringMapMutex.unlock();
 	}
 
+	cstr Tr(cstr englishText)
+	{
+		if (englishText == nullptr || englishText[0] == '\0')
+			return englishText;
+
+		HashStringMapMutex.lock_shared();
+		defer { HashStringMapMutex.unlock_shared(); };
+		auto it = TextStringMap.find(Hash(englishText));
+		return (it != TextStringMap.end()) ? it->second.c_str() : englishText;
+	}
+
+	// NOTE: [Text] keys and values are single ini lines, so line breaks are written as a literal backslash + 'n'
+	static std::string UnescapeTextLine(std::string_view in)
+	{
+		std::string out;
+		out.reserve(in.size());
+		for (size_t i = 0; i < in.size(); i++)
+		{
+			if (in[i] == '\\' && (i + 1) < in.size() && in[i + 1] == 'n') { out += '\n'; i++; }
+			else out += in[i];
+		}
+		return out;
+	}
+
 	void ReloadLocaleFile(cstr languageId)
 	{
 		HashStringMapMutex.lock();
@@ -156,6 +184,12 @@ namespace PeepoDrumKit::i18n
 				{
 					FontMainFileNameTarget = keyValue.Value;
 				}
+				return;
+			}
+			if (iniParser.CurrentSection == "Text")
+			{
+				if (!keyValue.Key.empty() && !keyValue.Value.empty())
+					TextStringMap[Hash(UnescapeTextLine(keyValue.Key))] = UnescapeTextLine(keyValue.Value);
 				return;
 			}
 			if (iniParser.CurrentSection != "Translations") return;

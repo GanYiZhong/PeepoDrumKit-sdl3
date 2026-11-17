@@ -202,6 +202,14 @@ namespace ApplicationHost
 
 		SyncWindowSizeToCanvasCssSize();
 
+		// NOTE: The browser can leave fullscreen on its own (Esc), so the flag shown in the menu has to follow the real state
+		if (!GlobalState.SetBorderlessFullscreenNextFrame.has_value())
+		{
+			EmscriptenFullscreenChangeEvent fullscreenStatus = {};
+			if (emscripten_get_fullscreen_status(&fullscreenStatus) == EMSCRIPTEN_RESULT_SUCCESS)
+				GlobalState.IsBorderlessFullscreen = (fullscreenStatus.isFullscreen != 0);
+		}
+
 		if (!WebAppState.PendingDroppedFilePaths.empty())
 		{
 			for (auto& path : WebAppState.PendingDroppedFilePaths)

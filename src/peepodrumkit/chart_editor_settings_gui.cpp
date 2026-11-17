@@ -41,15 +41,15 @@ namespace PeepoDrumKit
 	static b8 GuiBoolCombo(cstr label, b8* inOutValue, b8 defaultValue, BoolLabels boolLabels = {})
 	{
 		b8 changesWereMade = false;
-		if (Gui::BeginCombo(label, boolLabels[*inOutValue], ImGuiComboFlags_None))
+		if (Gui::BeginCombo(label, i18n::Tr(boolLabels[*inOutValue]), ImGuiComboFlags_None))
 		{
 			for (i32 i = 0; i <= 1; i++)
 			{
 				const b8 it = (i == 0);
 				const b8 isSelected = (*inOutValue == it);
-				if (Gui::Selectable(boolLabels[it], isSelected)) { *inOutValue = it; changesWereMade = true; }
+				if (Gui::Selectable(i18n::Tr(boolLabels[it]), isSelected)) { *inOutValue = it; changesWereMade = true; }
 				if (isSelected) { Gui::SetItemDefaultFocus(); }
-				if (it == defaultValue) { Gui::SameLine(); GuiRightAlignedTextDisabled("(Default)"); }
+				if (it == defaultValue) { Gui::SameLine(); GuiRightAlignedTextDisabled(i18n::Tr("(Default)")); }
 			}
 			Gui::EndCombo();
 		}
@@ -161,8 +161,8 @@ namespace PeepoDrumKit
 			inline WithDefault<T>* ValueAs() { return (DataType == TemplateToDataType<T>()) ? static_cast<WithDefault<T>*>(ValuePtr) : nullptr; }
 
 			template <typename T>
-			SettingsEntry(WithDefault<T>& v, std::string_view header, std::string_view description, WidgetType widgetType = WidgetType::Default)
-				: DataType(TemplateToDataType<T>()), Widget(widgetType), ValuePtr(&v), HasValuePtr(&v.HasValue), Header(header), Description(description)
+			SettingsEntry(WithDefault<T>& v, cstr header, cstr description, WidgetType widgetType = WidgetType::Default)
+				: DataType(TemplateToDataType<T>()), Widget(widgetType), ValuePtr(&v), HasValuePtr(&v.HasValue), Header(i18n::Tr(header)), Description(i18n::Tr(description))
 			{
 				ResetToDefaultFunc = [](void* valuePtr) { static_cast<WithDefault<T>*>(valuePtr)->ResetToDefault(); };
 				SetHasValueIfNotDefaultFunc = [](void* valuePtr) { static_cast<WithDefault<T>*>(valuePtr)->SetHasValueIfNotDefault(); };
@@ -187,7 +187,6 @@ namespace PeepoDrumKit
 
 				if (!in.Description.empty())
 				{
-					assert(in.Description.back() == '.');
 					Gui::PushStyleColor(ImGuiCol_Text, Gui::GetColorU32(ImGuiCol_Text, 0.8f));
 					Gui::PushTextWrapPos(ClampBot(Gui::GetCursorPosX() + Gui::GetContentRegionAvail().x, Gui::GetFrameHeight() * 12.0f));
 					Gui::TextWrapped(in.Description.data());
@@ -213,17 +212,17 @@ namespace PeepoDrumKit
 				{
 					if (in.Widget == WidgetType::I32_BarDivisionComboBox)
 					{
-						char buffer[64]; sprintf_s(buffer, "Bar Division 1/%d", inOutI32->Value);
+						char buffer[64]; sprintf_s(buffer, "%s 1/%d", i18n::Tr("Bar Division"), inOutI32->Value);
 						if (Gui::BeginCombo("##", buffer, ImGuiComboFlags_None))
 						{
 							static constexpr i32 barDivisions[] = { 4, 8, 12, 16, 24, 32, 48, 64 };
 							for (const i32 it : barDivisions)
 							{
-								sprintf_s(buffer, "Bar Division 1/%d", it);
+								sprintf_s(buffer, "%s 1/%d", i18n::Tr("Bar Division"), it);
 								const b8 isSelected = (it == inOutI32->Value);
 								if (Gui::Selectable(buffer, isSelected)) { inOutI32->Value = it; changesWereMade = true; }
 								if (isSelected) { Gui::SetItemDefaultFocus(); }
-								if (it == inOutI32->Default) { Gui::SameLine(); GuiRightAlignedTextDisabled("(Default)"); }
+								if (it == inOutI32->Default) { Gui::SameLine(); GuiRightAlignedTextDisabled(i18n::Tr("(Default)")); }
 							}
 							Gui::EndCombo();
 						}
@@ -260,7 +259,7 @@ namespace PeepoDrumKit
 						Gui::SameLine(0.0f, style.ItemInnerSpacing.x);
 						if (Gui::BeginCombo("##Combo", "", ImGuiComboFlags_NoPreview | ImGuiComboFlags_PopupAlignLeft))
 						{
-							if (Gui::Selectable("Reset to Default", false, !inOutF32->HasValue ? ImGuiSelectableFlags_Disabled : 0)) { in.ResetToDefault(); changesWereMade = true; }
+							if (Gui::Selectable(i18n::Tr("Reset to Default"), false, !inOutF32->HasValue ? ImGuiSelectableFlags_Disabled : 0)) { in.ResetToDefault(); changesWereMade = true; }
 							Gui::EndCombo();
 						}
 						if (changesWereMade) { inOutF32->Value = Clamp(inOutF32->Value, 50.0f, 5000.0f); }
@@ -279,8 +278,8 @@ namespace PeepoDrumKit
 						Gui::SameLine(0.0f, style.ItemInnerSpacing.x);
 						if (Gui::BeginCombo("##Combo", "", ImGuiComboFlags_NoPreview | ImGuiComboFlags_PopupAlignLeft))
 						{
-							if (Gui::Selectable("Reset to Default", false, !inOutF32->HasValue ? ImGuiSelectableFlags_Disabled : 0)) { in.ResetToDefault(); changesWereMade = true; }
-							if (Gui::Selectable("Disable Animation", false, (inOutF32->Value == 0.0f) ? ImGuiSelectableFlags_Disabled : 0)) { inOutF32->Value = 0.0f; changesWereMade = true; }
+							if (Gui::Selectable(i18n::Tr("Reset to Default"), false, !inOutF32->HasValue ? ImGuiSelectableFlags_Disabled : 0)) { in.ResetToDefault(); changesWereMade = true; }
+							if (Gui::Selectable(i18n::Tr("Disable Animation"), false, (inOutF32->Value == 0.0f) ? ImGuiSelectableFlags_Disabled : 0)) { inOutF32->Value = 0.0f; changesWereMade = true; }
 							Gui::EndCombo();
 						}
 						if (changesWereMade) { inOutF32->Value = Clamp(inOutF32->Value, 0.0f, 1000.0f); }
@@ -318,7 +317,7 @@ namespace PeepoDrumKit
 			if (filter != nullptr)
 			{
 				Gui::SetNextItemWidth(-1.0f);
-				if (Gui::InputTextWithHint("##Filter", "Type to search...", filter->InputBuf, ArrayCount(filter->InputBuf)))
+				if (Gui::InputTextWithHint("##Filter", i18n::Tr("Type to search..."), filter->InputBuf, ArrayCount(filter->InputBuf)))
 					filter->Build();
 			}
 
@@ -348,7 +347,7 @@ namespace PeepoDrumKit
 
 					Gui::TableSetColumnIndex(0);
 					Gui::AlignTextToFramePadding();
-					(*entry.HasValuePtr) ? Gui::TextUnformatted("(User)") : Gui::TextDisabled("(Default)");
+					(*entry.HasValuePtr) ? Gui::TextUnformatted(i18n::Tr("(User)")) : Gui::TextDisabled("%s", i18n::Tr("(Default)"));
 
 					Gui::TableSetColumnIndex(1);
 
@@ -372,7 +371,7 @@ namespace PeepoDrumKit
 					{
 						GuiTextWithCategoryHighlight(entry.Header);
 						Gui::Separator();
-						if (Gui::MenuItem("Reset to Default", "", nullptr))
+						if (Gui::MenuItem(i18n::Tr("Reset to Default"), "", nullptr))
 						{
 							entry.ResetToDefault();
 							changesWereMade = true;
@@ -407,6 +406,9 @@ namespace PeepoDrumKit
 		{
 			WithDefault<MultiInputBinding>* Binding;
 			std::string_view Name;
+
+			InputSettingsEntry() : Binding(nullptr), Name() {}
+			InputSettingsEntry(WithDefault<MultiInputBinding>* binding, cstr name) : Binding(binding), Name(i18n::Tr(name)) {}
 		};
 
 		static b8 DrawInputEntriesListTableGui(InputSettingsEntry* entries, size_t entriesCount, ImGuiTextFilter* filter, ChartSettingsWindowTempInputState& state)
@@ -424,7 +426,7 @@ namespace PeepoDrumKit
 			if (filter != nullptr)
 			{
 				Gui::SetNextItemWidth(-1.0f);
-				if (Gui::InputTextWithHint("##Filter", "Type to search...", filter->InputBuf, ArrayCount(filter->InputBuf)))
+				if (Gui::InputTextWithHint("##Filter", i18n::Tr("Type to search..."), filter->InputBuf, ArrayCount(filter->InputBuf)))
 					filter->Build();
 			}
 
@@ -437,8 +439,8 @@ namespace PeepoDrumKit
 				Gui::PushFont(FontMain, GuiScaleI32_AtTarget(FontBaseSizes::Medium));
 				Gui::TableSetupScrollFreeze(0, 1);
 				Gui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, Gui::CalcTextSize("(Default)").x + Gui::GetFrameHeight());
-				Gui::TableSetupColumn("Action", ImGuiTableColumnFlags_None);
-				Gui::TableSetupColumn("Binding", ImGuiTableColumnFlags_None);
+				Gui::TableSetupColumn(i18n::Tr("Action"), ImGuiTableColumnFlags_None);
+				Gui::TableSetupColumn(i18n::Tr("Binding"), ImGuiTableColumnFlags_None);
 				Gui::TableHeadersRow();
 				Gui::PopFont();
 
@@ -467,7 +469,7 @@ namespace PeepoDrumKit
 					Gui::TableNextRow();
 
 					Gui::TableSetColumnIndex(0);
-					(entry.Binding->HasValue) ? Gui::TextUnformatted("(User)") : Gui::TextDisabled("(Default)");
+					(entry.Binding->HasValue) ? Gui::TextUnformatted(i18n::Tr("(User)")) : Gui::TextDisabled("%s", i18n::Tr("(Default)"));
 
 					Gui::TableSetColumnIndex(1);
 
@@ -476,8 +478,8 @@ namespace PeepoDrumKit
 					{
 						GuiTextWithCategoryHighlight(entry.Name);
 						Gui::Separator();
-						if (Gui::MenuItem("Clear All", "", nullptr)) { entry.Binding->Value.ClearAll(); entry.Binding->SetHasValueIfNotDefault(); changesWereMade = true; }
-						if (Gui::MenuItem("Reset to Default", "", nullptr)) { entry.Binding->ResetToDefault(); changesWereMade = true; }
+						if (Gui::MenuItem(i18n::Tr("Clear All"), "", nullptr)) { entry.Binding->Value.ClearAll(); entry.Binding->SetHasValueIfNotDefault(); changesWereMade = true; }
+						if (Gui::MenuItem(i18n::Tr("Reset to Default"), "", nullptr)) { entry.Binding->ResetToDefault(); changesWereMade = true; }
 						Gui::EndPopup();
 					}
 
@@ -525,7 +527,7 @@ namespace PeepoDrumKit
 
 			if (state.MultiBindingPopupFadeCurrent >= 0.001f)
 			{
-				cstr selectedBindingName = "Unnamed";
+				cstr selectedBindingName = i18n::Tr("Unnamed");
 				for (size_t i = 0; i < entriesCount; i++)
 				{
 					if (entries[i].Binding == state.SelectedMultiBinding)
@@ -579,13 +581,13 @@ namespace PeepoDrumKit
 							Gui::PushStyleColor(ImGuiCol_ButtonActive, Gui::GetStyleColorVec4(ImGuiCol_HeaderActive));
 							{
 								Gui::TableSetColumnIndex(1);
-								if (Gui::Button("Up", { Gui::GetContentRegionAvail().x, 0.0f })) { indexToMoveUp = i; }
+								if (Gui::Button((std::string(i18n::Tr("Up")) + "###Up").c_str(), { Gui::GetContentRegionAvail().x, 0.0f })) { indexToMoveUp = i; }
 
 								Gui::TableSetColumnIndex(2);
-								if (Gui::Button("Down", { Gui::GetContentRegionAvail().x, 0.0f })) { indexToMoveDown = i; }
+								if (Gui::Button((std::string(i18n::Tr("Down")) + "###Down").c_str(), { Gui::GetContentRegionAvail().x, 0.0f })) { indexToMoveDown = i; }
 
 								Gui::TableSetColumnIndex(3);
-								if (Gui::Button("Remove", { Gui::GetContentRegionAvail().x, 0.0f })) { indexToRemove = i; }
+								if (Gui::Button((std::string(i18n::Tr("Remove")) + "###Remove").c_str(), { Gui::GetContentRegionAvail().x, 0.0f })) { indexToRemove = i; }
 							}
 							Gui::PopStyleColor(3);
 
@@ -644,7 +646,7 @@ namespace PeepoDrumKit
 							(state.SelectedMultiBinding->Value == state.SelectedMultiBindingOnOpenCopy.Value);
 
 						Gui::BeginDisabled(isSameAsOnOpen);
-						if (Gui::Button("Revert Changes", { Gui::CalcItemWidth(), 0.0f }))
+						if (Gui::Button((std::string(i18n::Tr("Revert Changes")) + "###RevertChanges").c_str(), { Gui::CalcItemWidth(), 0.0f }))
 						{
 							state.SelectedMultiBinding->HasValue = state.SelectedMultiBindingOnOpenCopy.HasValue;
 							state.SelectedMultiBinding->Value = state.SelectedMultiBindingOnOpenCopy.Value;
@@ -655,7 +657,7 @@ namespace PeepoDrumKit
 						Gui::SameLine();
 
 						Gui::BeginDisabled(!state.SelectedMultiBinding->HasValue);
-						if (Gui::Button("Reset to Default", { Gui::CalcItemWidth(), 0.0f }))
+						if (Gui::Button((std::string(i18n::Tr("Reset to Default")) + "###ResettoDefault").c_str(), { Gui::CalcItemWidth(), 0.0f }))
 						{
 							state.SelectedMultiBinding->ResetToDefault();
 							changesWereMade = true;
@@ -684,7 +686,7 @@ namespace PeepoDrumKit
 		Gui::PushStyleColor(ImGuiCol_TabSelected, Gui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
 		if (Gui::BeginTabBar("SettingsTabs", ImGuiTabBarFlags_None))
 		{
-			if (Gui::BeginTabItem("General Settings"))
+			if (Gui::BeginTabItem((std::string(i18n::Tr("General Settings")) + "###GeneralSettings").c_str()))
 			{
 				Gui::PushStyleVar(ImGuiStyleVar_FramePadding, originalFramePadding);
 				{
@@ -753,7 +755,7 @@ namespace PeepoDrumKit
 				Gui::EndTabItem();
 			}
 
-			if (Gui::BeginTabItem("Input Bindings"))
+			if (Gui::BeginTabItem((std::string(i18n::Tr("Input Bindings")) + "###InputBindings").c_str()))
 			{
 				Gui::PushStyleVar(ImGuiStyleVar_FramePadding, originalFramePadding);
 				{
@@ -874,7 +876,7 @@ namespace PeepoDrumKit
 				Gui::EndTabItem();
 			}
 
-			if (Gui::BeginTabItem("Audio Settings"))
+			if (Gui::BeginTabItem((std::string(i18n::Tr("Audio Settings")) + "###AudioSettings").c_str()))
 			{
 				Gui::PushStyleVar(ImGuiStyleVar_FramePadding, originalFramePadding);
 				{
