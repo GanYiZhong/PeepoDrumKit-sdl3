@@ -132,6 +132,19 @@ extern "C"
 			WebChartEditorInstance->WebSaveChart();
 	}
 
+	// NOTE: See "WebEmbeddedMode" in chart_editor.cpp. Set by the page before the first frame (pdkOptions.embedded)
+	EMSCRIPTEN_KEEPALIVE void pdk_web_set_embedded(int embedded)
+	{
+		WebSetEmbeddedMode(embedded != 0);
+	}
+
+	// NOTE: GUI language chosen by the host page ("en", "jp", "zh-tw", ...), optionally hiding the editor's own language menu
+	EMSCRIPTEN_KEEPALIVE void pdk_web_set_language(const char* languageIdUTF8, int hideLanguageMenu)
+	{
+		if (languageIdUTF8 != nullptr)
+			WebSetLanguage(languageIdUTF8, hideLanguageMenu != 0);
+	}
+
 	EMSCRIPTEN_KEEPALIVE int pdk_web_is_loading(void)
 	{
 		return (WebChartEditorInstance != nullptr && WebChartEditorInstance->WebIsLoading()) ? 1 : 0;

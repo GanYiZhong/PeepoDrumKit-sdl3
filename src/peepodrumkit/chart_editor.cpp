@@ -80,6 +80,31 @@ namespace PeepoDrumKit
 	//		 Needed because a freshly (re)populated Dear ImGui tab bar always selects its first tab, which would otherwise override the selection
 	static const ChartCourse* ForceSelectCourseTab = nullptr;
 
+#ifdef __EMSCRIPTEN__
+	// NOTE: Web build "embedded" mode (pdkOptions.embedded): the host page owns the chart (it opened it and stores it),
+	//		 so everything that would open a different chart / audio file or save under another name is hidden or ignored
+	static b8 WebEmbeddedMode = false;
+	void WebSetEmbeddedMode(b8 embedded) { WebEmbeddedMode = embedded; }
+	#define PEEPO_FILE_UI_ENABLED (!WebEmbeddedMode)
+
+	// NOTE: Web build: the host page can dictate the GUI language (pdkOptions.language), in which case the language menu is hidden.
+	//		 Applied at the start of the next frame, unknown locale ids fall back to English
+	static std::string WebPendingLanguage;
+	static b8 WebLanguageMenuHidden = false;
+	void WebSetLanguage(std::string_view languageId, b8 hideLanguageMenu)
+	{
+		WebPendingLanguage = languageId;
+		WebLanguageMenuHidden = hideLanguageMenu;
+	}
+	#define PEEPO_LANGUAGE_MENU_ENABLED (!WebLanguageMenuHidden)
+	// NOTE: The size of the "window" is whatever size the page gives the canvas, resizing it from inside makes no sense in a browser
+	#define PEEPO_WINDOW_SIZE_MENU_ENABLED (false)
+#else
+	#define PEEPO_FILE_UI_ENABLED (true)
+	#define PEEPO_LANGUAGE_MENU_ENABLED (true)
+	#define PEEPO_WINDOW_SIZE_MENU_ENABLED (true)
+#endif
+
 	ChartEditor::ChartEditor()
 	{
 #ifdef __EMSCRIPTEN__
@@ -128,6 +153,14 @@ namespace PeepoDrumKit
 		if (Gui::BeginMenuBar())
 		{
 			std::string nextLanguageToSelect = SelectedGuiLanguage;
+#ifdef __EMSCRIPTEN__
+			if (!WebPendingLanguage.empty())
+			{
+				const b8 isKnown = std::any_of(i18n::LocaleEntries.begin(), i18n::LocaleEntries.end(), [](const auto& it) { return it.id == WebPendingLanguage; });
+				nextLanguageToSelect = isKnown ? WebPendingLanguage : std::string("en");
+				WebPendingLanguage.clear();
+			}
+#endif
 			defer {
 				if (nextLanguageToSelect != SelectedGuiLanguage)
 				{
@@ -137,7 +170,7 @@ namespace PeepoDrumKit
 				}
 			};
 
-			if (Gui::BeginMenu(UI_Str("MENU_FILE")))
+			if (PEEPO_FILE_UI_ENABLED && Gui::BeginMenu(UI_Str("MENU_FILE")))
 			{
 				if (Gui::MenuItem(UI_Str("ACT_FILE_NEW_CHART"), ToShortcutString(*Settings.Input.Editor_ChartNew).Data)) { CheckOpenSaveConfirmationPopupThenCall([&] { CreateNewChart(context); }); }
 				if (Gui::MenuItem(UI_Str("ACT_FILE_OPEN"), ToShortcutString(*Settings.Input.Editor_ChartOpen).Data)) { CheckOpenSaveConfirmationPopupThenCall([&] { OpenLoadChartFileDialog(context); }); }
@@ -431,7 +464,7 @@ namespace PeepoDrumKit
 				if (Gui::MenuItem(UI_Str("ACT_WINDOW_TOGGLE_FULLSCREEN"), ToShortcutString(*Settings.Input.Editor_ToggleFullscreen).Data, ApplicationHost::GlobalState.IsBorderlessFullscreen))
 					ApplicationHost::GlobalState.SetBorderlessFullscreenNextFrame = !ApplicationHost::GlobalState.IsBorderlessFullscreen;
 
-				if (Gui::BeginMenu(UI_Str("ACT_WINDOW_SIZE")))
+				if (PEEPO_WINDOW_SIZE_MENU_ENABLED && Gui::BeginMenu(UI_Str("ACT_WINDOW_SIZE")))
 				{
 					const b8 allowResize = !ApplicationHost::GlobalState.IsBorderlessFullscreen;
 					const ivec2 currentResolution = ApplicationHost::GlobalState.WindowSize;
@@ -480,7 +513,7 @@ namespace PeepoDrumKit
 				Gui::EndMenu();
 			}
 
-			if (Gui::BeginMenu(UI_Str("MENU_LANGUAGE")))
+			if (PEEPO_LANGUAGE_MENU_ENABLED && Gui::BeginMenu(UI_Str("MENU_LANGUAGE")))
 			{
 				for (const auto& it : i18n::LocaleEntries)
 				{
@@ -963,6 +996,7 @@ namespace PeepoDrumKit
 		// NOTE: Drag and drop handling
 		for (const std::string& droppedFilePath : ApplicationHost::GlobalState.FilePathsDroppedThisFrame)
 		{
+			if (!PEEPO_FILE_UI_ENABLED) break;
 			if (Path::HasAnyExtension(droppedFilePath, TJA::Extension)) { CheckOpenSaveConfirmationPopupThenCall([this, pathCopy = droppedFilePath] { StartAsyncImportingChartFile(pathCopy); }); break; }
 			if (Path::HasAnyExtension(droppedFilePath, Audio::SupportedFileFormatExtensionsPacked)) { SetAndStartLoadingChartSongFileName(droppedFilePath, context.Undo); break; }
 			if (Path::HasAnyExtension(droppedFilePath, TJA::PreimageExtensions)) { SetAndStartLoadingSongJacketFileName(droppedFilePath, context.Undo); break; }
@@ -1001,10 +1035,10 @@ namespace PeepoDrumKit
 				if (Gui::IsAnyPressed(*Settings.Input.Editor_Redo, true))
 					context.Undo.Redo();
 
-				if (Gui::IsAnyPressed(*Settings.Input.Editor_ChartNew, false))
+				if (PEEPO_FILE_UI_ENABLED && Gui::IsAnyPressed(*Settings.Input.Editor_ChartNew, false))
 					CheckOpenSaveConfirmationPopupThenCall([&] { CreateNewChart(context); });
 
-				if (Gui::IsAnyPressed(*Settings.Input.Editor_ChartOpen, false))
+				if (PEEPO_FILE_UI_ENABLED && Gui::IsAnyPressed(*Settings.Input.Editor_ChartOpen, false))
 					CheckOpenSaveConfirmationPopupThenCall([&] { OpenLoadChartFileDialog(context); });
 
 				if (Gui::IsAnyPressed(*Settings.Input.Editor_ChartOpenDirectory, false) && CanOpenChartDirectoryInFileExplorer(context))
@@ -1014,7 +1048,10 @@ namespace PeepoDrumKit
 					TrySaveChartOrOpenSaveAsDialog(context);
 
 				if (Gui::IsAnyPressed(*Settings.Input.Editor_ChartSaveAs, false))
-					OpenChartSaveAsDialog(context);
+				{
+					// NOTE: "Save as" makes no sense while the host owns the chart, treat it as a regular save
+					if (PEEPO_FILE_UI_ENABLED) OpenChartSaveAsDialog(context); else TrySaveChartOrOpenSaveAsDialog(context);
+				}
 			}
 		}
 
@@ -1422,6 +1459,9 @@ namespace PeepoDrumKit
 
 	void ChartEditor::CreateNewChart(ChartContext& context)
 	{
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ Module.pdkInternal.onChartClosed(); });
+#endif
 		if (loadSongFuture.valid()) loadSongFuture.get();
 		if (!context.SongSourceFilePath.empty()) StartAsyncLoadingSongAudioFile("");
 		if (loadJacketFuture.valid()) loadJacketFuture.get();
@@ -1539,8 +1579,12 @@ namespace PeepoDrumKit
 
 		PersistentApp.RecentFiles.Add(std::string { absoluteChartFilePath });
 #ifdef __EMSCRIPTEN__
-		// NOTE: Store the updated recent files list (and the chart itself) in IndexedDB so that it survives a page reload
-		EM_ASM({ Module.pdkInternal.schedulePersist(); });
+		// NOTE: Lets the page remember the original file text (see "minimal change saving" in web/pdk_api.js)
+		//		 and store the updated recent files list in IndexedDB so that it survives a page reload
+		{
+			const std::string pathCopy { absoluteChartFilePath };
+			EM_ASM({ Module.pdkInternal.onChartOpening(UTF8ToString($0)); Module.pdkInternal.schedulePersist(); }, pathCopy.c_str());
+		}
 #endif
 		importChartFuture = std::async(PEEPO_ASYNC_LAUNCH_POLICY, [tempPathCopy = std::string(absoluteChartFilePath)]() mutable->AsyncImportChartResult
 		{
@@ -1683,6 +1727,9 @@ namespace PeepoDrumKit
 
 	b8 ChartEditor::OpenLoadChartFileDialog(ChartContext& context)
 	{
+		if (!PEEPO_FILE_UI_ENABLED)
+			return false;
+
 		fileDialog.InTitle = "Open Chart File";
 		fileDialog.InFilters = { { TJA::FilterName, TJA::FilterSpec }, { Shell::AllFilesFilterName, Shell::AllFilesFilterSpec }, };
 		fileDialog.InParentWindowHandle = ApplicationHost::GlobalState.NativeWindowHandle;
@@ -1697,6 +1744,9 @@ namespace PeepoDrumKit
 
 	b8 ChartEditor::OpenLoadAudioFileDialog(Undo::UndoHistory& undo)
 	{
+		if (!PEEPO_FILE_UI_ENABLED)
+			return false;
+
 		fileDialog.InTitle = "Open Audio File";
 		fileDialog.InFilters = { { "Audio Files", "flac;ogg;mp3;wav" }, { Shell::AllFilesFilterName, Shell::AllFilesFilterSpec }, };
 		fileDialog.InParentWindowHandle = ApplicationHost::GlobalState.NativeWindowHandle;
@@ -1711,6 +1761,9 @@ namespace PeepoDrumKit
 
 	b8 ChartEditor::OpenLoadJacketFileDialog(Undo::UndoHistory& undo)
 	{
+		if (!PEEPO_FILE_UI_ENABLED)
+			return false;
+
 		fileDialog.InTitle = "Open Jacket File";
 		fileDialog.InFilters = { { "Image Files", "jpg;jpeg;png" }, { Shell::AllFilesFilterName, Shell::AllFilesFilterSpec }, };
 		fileDialog.InParentWindowHandle = ApplicationHost::GlobalState.NativeWindowHandle;

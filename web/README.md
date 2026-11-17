@@ -69,6 +69,11 @@ Open the page, then use the editor like the desktop version:
   ("Audio file … not found — Choose audio file") lets you add the song afterwards. File name case and sub folders in `WAVE:` don't matter.
 - **File → Save / Save As** (Ctrl+S) downloads the chart as a UTF-8 `.tja` (or hands it to the host page, see below).
 - Click the editor once before using keyboard shortcuts; keys only go to the editor while its canvas has focus.
+- **Saving only changes what you edited.** The desktop editor always writes a complete TJA of its own, which drops comments,
+  headers it doesn't know (e.g. `DEMOSTART`) and the original formatting. The web build instead merges its export into the text of the
+  file as it was opened: untouched headers and courses are kept byte for byte, changed headers are rewritten in place, and only courses
+  whose notes were edited get the editor's own `#START … #END` block. (`pdkOptions.minimalChangeSave = false` turns this off.)
+- The **Window → Window Size** menu is hidden: the editor is as large as the page makes its canvas.
 - Two defaults differ from the desktop build: an opened chart starts on its **highest difficulty** (Ura > Oni > Hard > …) rather than
   the first course in the file, and the **Game Preview** tab is in front at startup instead of the usage guide.
 
@@ -104,14 +109,16 @@ All functions live on `Module.pdk` (`web/pdk_api.js`):
 | `pdk.ready` | `Promise` resolving once the editor has started. Don't call anything else before that. |
 | `pdk.openChart({ tja, tjaName?, audio?, audioName?, files?, discardUnsavedChanges? })` | Opens a chart. `tja` is a string or `Uint8Array`/`ArrayBuffer` (UTF-8 or Shift-JIS file bytes). `audio` is the bytes of an `.ogg`/`.mp3`/`.wav`/`.flac` file; `audioName` defaults to the chart's `WAVE:` header, and if it differs the chart's `WAVE:` is updated to it. `files` is an optional `{ name: bytes }` map of extra files placed next to the chart. Loading is asynchronous, poll `pdk.isLoading()`. |
 | `pdk.loadAudio(bytes, fileName)` | Replaces the current chart's song (also sets `WAVE:`). |
-| `pdk.getTJA()` | The current chart as TJA text (UTF-8, no BOM), including unsaved edits. |
+| `pdk.getTJA()` | The current chart as TJA text (UTF-8, no BOM), including unsaved edits. Like saving, this is the opened text with only the edited parts replaced; `pdk.getTJA({ raw: true })` returns the editor's own complete export. |
 | `pdk.save()` | Same as File → Save. |
 | `pdk.onSave = (tjaText, fileName) => {}` | Called when the chart is saved. If unset, saving downloads the file instead. |
 | `pdk.hasUnsavedChanges()` / `pdk.markSaved()` | Query / clear the editor's "unsaved changes" state. |
 | `pdk.newChart()`, `pdk.isLoading()`, `pdk.saveSettings()` | |
 | `pdk.onReady`, `pdk.onTitleChange = (title) => {}` | Optional callbacks. Without `onTitleChange` the editor sets `document.title`. |
 | `pdk.onMissingAudio = (waveName) => {}` | A chart was opened without the audio file its `WAVE:` header refers to (answer with `pdk.loadAudio`). |
-| `Module.pdkOptions` | Set before loading the script: `persistSettings`, `persistCharts`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle`, `missingAudioPrompt` (all default `true`). |
+| `Module.pdkOptions.embedded` | `true` when the host page owns the chart (it opens it with `openChart` and stores what `onSave` delivers): hides the **File** menu, ignores dropped files and the open / new / save-as shortcuts, and never asks for a missing audio file. Default `false`. |
+| `Module.pdkOptions.language` | GUI language chosen by the host (`"en"`, `"es"`, `"fr"`, `"jp"`, `"ru"`, `"zh-cn"`, `"zh-tw"`; unknown values fall back to English). Also hides the editor's **Language** menu unless `hideLanguageMenu: false`. |
+| `Module.pdkOptions` | Other switches, set before loading the script: `persistSettings`, `persistCharts`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle`, `missingAudioPrompt`, `minimalChangeSave` (all default `true`). |
 
 The same things are exported as plain C functions (`_pdk_web_open_chart`, `_pdk_web_get_tja`, …, see
 `src/peepodrumkit/chart_editor_web.cpp`) for anyone who prefers `ccall`.

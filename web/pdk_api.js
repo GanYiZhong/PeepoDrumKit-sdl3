@@ -171,6 +171,7 @@
   function hideMissingAudioBanner() {
     if (missingAudioBanner && missingAudioBanner.parentNode) missingAudioBanner.parentNode.removeChild(missingAudioBanner);
     missingAudioBanner = null;
+    missingAudioBannerChartPath = null;
   }
 
   // Runs the callback once the editor has finished loading the chart (relative paths are resolved against the loaded chart)
@@ -180,6 +181,12 @@
       if (!Module._pdk_web_is_loading()) callback();
       else setTimeout(poll, 50);
     })();
+  }
+
+  // resolveChartAudio() shows the banner right before the editor opens that chart; opening any other chart removes it
+  var missingAudioBannerChartPath = null;
+  function hideMissingAudioBannerUnlessFor(path) {
+    if (missingAudioBannerChartPath !== path) hideMissingAudioBanner();
   }
 
   function loadAudioKeepingSavedState(path) {
@@ -193,7 +200,7 @@
   function showMissingAudioBanner(waveName, expectedPath) {
     hideMissingAudioBanner();
     if (typeof Module.pdk.onMissingAudio === "function") Module.pdk.onMissingAudio(waveName);
-    if (options.missingAudioPrompt === false) return;
+    if (options.missingAudioPrompt === false || options.embedded) return;
 
     var chinese = /^zh/i.test(navigator.language || "");
     var canvas = Module.canvas || document.getElementById("canvas");
@@ -275,6 +282,7 @@
       } catch (e) { console.warn("[PeepoDrumKit] could not move the audio file", e); }
     }
     showMissingAudioBanner(waveName, expectedPath);
+    missingAudioBannerChartPath = tjaPath;
   }
 
   function afterBrowserFilesImported(primary) {
@@ -284,12 +292,173 @@
   }
 
   // ------------------------------------------------------------------------------------------------------------------
+  // Minimal change saving
+  // The editor always exports a complete TJA of its own: comments, headers it doesn't know (DEMOSTART, ...) and the
+  // original formatting are gone, even for parts of the chart that were never touched. So instead of handing that
+  // export out directly it is three-way merged into the text of the file as it was opened:
+  //   original = the file as opened, baseline = the editor's export right after loading, current = its export now.
+  // Whatever is identical between baseline and current was not edited and is taken verbatim from the original.
+  // Only changed headers are rewritten, and only courses whose notes changed get the editor's #START..#END block.
+  // ------------------------------------------------------------------------------------------------------------------
+  var COURSE_ALIASES = { "0": "easy", "1": "normal", "2": "hard", "3": "oni", "4": "edit", "5": "tower", "6": "dan", "ura": "edit" };
+
+  function tjaSplitSections(text) {
+    var lines = text.replace(/\r\n?/g, "\n").split("\n");
+    var sections = [{ key: "", lines: [] }];
+    var counts = {};
+    lines.forEach(function (line) {
+      var match = /^\s*COURSE\s*:\s*([^\/]*)/i.exec(line);
+      if (match) {
+        var name = match[1].trim().toLowerCase();
+        name = COURSE_ALIASES[name] || name;
+        counts[name] = (counts[name] || 0) + 1;
+        sections.push({ key: name + "#" + counts[name], lines: [line] });
+      } else {
+        sections[sections.length - 1].lines.push(line);
+      }
+    });
+    return sections;
+  }
+
+  function tjaSectionText(lines) { return lines.join("\n").replace(/\s+$/, ""); }
+
+  // Splits a section into the lines before its first #START and the rest
+  function tjaSectionParts(lines) {
+    for (var i = 0; i < lines.length; i++)
+      if (/^\s*#START/i.test(lines[i])) return { head: lines.slice(0, i), body: lines.slice(i) };
+    return { head: lines.slice(), body: [] };
+  }
+
+  // "KEY:value" headers and "#COMMAND value" lines of a section head. Returns null if a key appears more than once
+  function tjaHeadEntries(head) {
+    var entries = [], byKey = {};
+    for (var i = 0; i < head.length; i++) {
+      var line = head[i].trim(), key, value;
+      if (line === "" || line.indexOf("//") === 0) continue;
+      if (line.charAt(0) === "#") {
+        var space = line.search(/\s/);
+        key = (space < 0 ? line : line.substring(0, space)).toUpperCase();
+        value = space < 0 ? "" : line.substring(space).trim();
+      } else {
+        var colon = line.indexOf(":");
+        if (colon < 0) continue;
+        key = line.substring(0, colon).trim().toUpperCase();
+        value = line.substring(colon + 1).trim();
+      }
+      if (byKey[key]) return null;
+      byKey[key] = { key: key, value: value, index: i, line: head[i] };
+      entries.push(byKey[key]);
+    }
+    return { list: entries, byKey: byKey };
+  }
+
+  function tjaMergeSection(original, baseline, current) {
+    if (tjaSectionText(current) === tjaSectionText(baseline)) return original;
+
+    var o = tjaSectionParts(original), b = tjaSectionParts(baseline), n = tjaSectionParts(current);
+    var oHead = tjaHeadEntries(o.head), bHead = tjaHeadEntries(b.head), nHead = tjaHeadEntries(n.head);
+    if (!oHead || !bHead || !nHead) return current;
+
+    var head = o.head.slice(), removed = {}, added = [];
+    nHead.list.forEach(function (entry) {
+      var before = bHead.byKey[entry.key];
+      if (before && before.value === entry.value) return;   // not edited
+      var existing = oHead.byKey[entry.key];
+      if (existing) head[existing.index] = entry.line; else added.push(entry.line);
+    });
+    bHead.list.forEach(function (entry) {
+      if (!nHead.byKey[entry.key] && oHead.byKey[entry.key]) removed[oHead.byKey[entry.key].index] = true;
+    });
+    head = head.filter(function (line, index) { return !removed[index]; });
+    if (added.length > 0) {
+      var insertAt = head.length;
+      while (insertAt > 0 && head[insertAt - 1].trim() === "") insertAt--;
+      head = head.slice(0, insertAt).concat(added, head.slice(insertAt));
+    }
+
+    var bodyUnchanged = tjaSectionText(n.body) === tjaSectionText(b.body);
+    return head.concat(bodyUnchanged ? o.body : n.body);
+  }
+
+  // Returns the merged text, or `current` unchanged whenever the three texts can't be matched up reliably
+  function tjaMerge(originalText, baselineText, currentText) {
+    try {
+      var eol = /\r\n/.test(originalText) ? "\r\n" : "\n";
+      var o = tjaSplitSections(originalText), b = tjaSplitSections(baselineText), n = tjaSplitSections(currentText);
+
+      // A single course chart without a COURSE: line: compare it against the editor's "headers + one course" as one section
+      if (o.length === 1 && b.length === 2 && n.length === 2) {
+        b = [{ key: "", lines: b[0].lines.concat(b[1].lines) }];
+        n = [{ key: "", lines: n[0].lines.concat(n[1].lines) }];
+      }
+
+      var oByKey = {}, bByKey = {};
+      o.forEach(function (section) { oByKey[section.key] = section; });
+      b.forEach(function (section) { bByKey[section.key] = section; });
+      if (o.length !== b.length || !b.every(function (section) { return oByKey[section.key]; })) return currentText;
+
+      var out = [];
+      n.forEach(function (section) {
+        var lines = (bByKey[section.key] && oByKey[section.key])
+          ? tjaMergeSection(oByKey[section.key].lines, bByKey[section.key].lines, section.lines)
+          : section.lines;   // a course that was added in the editor
+        var isNewCourse = !bByKey[section.key];
+        if (isNewCourse && out.length > 0 && out[out.length - 1].trim() !== "") out.push("");
+        out = out.concat(lines);
+      });
+      var merged = out.join("\n");
+      if (!/\n$/.test(merged)) merged += "\n";
+      return eol === "\n" ? merged : merged.replace(/\n/g, "\r\n");
+    } catch (e) {
+      console.warn("[PeepoDrumKit] could not merge the chart with its original text, using the editor's own output", e);
+      return currentText;
+    }
+  }
+
+  // The chart that is currently open: { path, original, baseline, generation }
+  var trackedChart = null;
+  var trackedGeneration = 0;
+
+  function rawEditorTJA() {
+    var pointer = Module._pdk_web_get_tja();
+    if (!pointer) return "";
+    var text = Module.UTF8ToString(pointer);
+    Module._free(pointer);
+    return text;
+  }
+
+  function captureTrackedBaseline() {
+    if (trackedChart) trackedChart.baseline = rawEditorTJA();
+  }
+
+  function mergedEditorTJA(currentText) {
+    if (options.minimalChangeSave === false || !trackedChart || trackedChart.baseline === null) return currentText;
+    return tjaMerge(trackedChart.original, trackedChart.baseline, currentText);
+  }
+
+  // ------------------------------------------------------------------------------------------------------------------
   // Hooks called from C++
   // ------------------------------------------------------------------------------------------------------------------
   Module.pdkInternal = {
     schedulePersist: function () { schedulePersist(); },
 
+    // A chart file is about to be loaded by the editor (file picker, drop, recent files or the host API)
+    onChartOpening: function (path) {
+      hideMissingAudioBannerUnlessFor(path);
+      var generation = ++trackedGeneration;
+      try { trackedChart = { path: path, original: decodeTJABytes(FS.readFile(path)), baseline: null }; }
+      catch (e) { trackedChart = null; return; }
+      // (deferred: this hook runs just before the editor actually starts loading)
+      setTimeout(function () {
+        whenNotLoading(function () { if (generation === trackedGeneration) captureTrackedBaseline(); });
+      }, 0);
+    },
+
+    onChartClosed: function () { trackedGeneration++; trackedChart = null; hideMissingAudioBanner(); },
+
     onReady: function () {
+      if (options.embedded) Module._pdk_web_set_embedded(1);
+      if (options.language) callWithString("pdk_web_set_language", String(options.language), [options.hideLanguageMenu === false ? 0 : 1]);
       try { pruneWorkDirectory(); } catch (e) { console.warn("[PeepoDrumKit] could not clean up stored charts", e); }
       readyResolve(Module.pdk);
       if (typeof Module.pdk.onReady === "function") Module.pdk.onReady(Module.pdk);
@@ -339,7 +508,15 @@
       var fileName = path.substring(path.lastIndexOf("/") + 1);
       schedulePersist();
       if (extensionOf(fileName) === "tja") {
-        var text = decodeTJABytes(bytes);
+        var exported = decodeTJABytes(bytes);
+        var text = mergedEditorTJA(exported);
+        if (text !== exported) {
+          bytes = withBOM(new TextEncoder().encode(text));
+          FS.writeFile(path, bytes);
+        }
+        // From here on this saved text is what later edits are merged into
+        trackedGeneration++;
+        trackedChart = { path: path, original: text, baseline: exported };
         if (typeof Module.pdk.onSave === "function") { Module.pdk.onSave(text, fileName); return; }
         downloadBytes(bytes, fileName, "text/plain;charset=utf-8");
       } else {
@@ -411,7 +588,11 @@
       // (skipped when the editor may still be showing its "save changes?" popup, the audio file is available next to the chart either way)
       if (chart.discardUnsavedChanges !== false && chart.audio != null && chart.audioName && sanitizeFileName(chart.audioName) !== sanitizeFileName(findWaveName(tjaText))) {
         var audioPath = WORK_DIR + "/" + sanitizeFileName(chart.audioName);
-        whenNotLoading(function () { callWithString("pdk_web_load_audio", audioPath); });
+        whenNotLoading(function () {
+          callWithString("pdk_web_load_audio", audioPath);
+          // (the host picked this file name, the resulting WAVE: change is not something the user edited)
+          captureTrackedBaseline();
+        });
       }
       return tjaPath;
     },
@@ -421,13 +602,11 @@
       return callWithString("pdk_web_load_audio", writeWorkFile(fileName || "song.ogg", toUint8Array(bytes))) === 1;
     },
 
-    /** Returns the current chart as TJA text (UTF-8, no BOM), including unsaved edits. */
-    getTJA: function () {
-      var pointer = Module._pdk_web_get_tja();
-      if (!pointer) return "";
-      var text = Module.UTF8ToString(pointer);
-      Module._free(pointer);
-      return text;
+    /** Returns the current chart as TJA text (UTF-8, no BOM), including unsaved edits. Like saving, this is the opened file's
+     *  text with only the edited parts replaced; pass { raw: true } for the editor's own complete export. */
+    getTJA: function (getOptions) {
+      var exported = rawEditorTJA();
+      return (getOptions && getOptions.raw) ? exported : mergedEditorTJA(exported);
     },
 
     /** Same as File > Save: results in onSave(tjaText, fileName) being called (or a download if there is no handler). */
@@ -483,7 +662,7 @@
   }
 
   // Files dropped onto the canvas behave like files dropped onto the desktop window
-  if (options.handleFileDrop !== false) {
+  if (options.handleFileDrop !== false || options.embedded) {
     var dropTarget = Module.canvas || document.getElementById("canvas");
     if (dropTarget) {
       dropTarget.addEventListener("dragover", function (event) { event.preventDefault(); });
@@ -491,6 +670,7 @@
         // SDL registers its own (per file, non BOM aware) drop handling on the canvas; this one replaces it
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (options.embedded) return;   // the host page owns the chart, nothing can be opened by dropping
         var dropped = event.dataTransfer && event.dataTransfer.files;
         if (!dropped || dropped.length === 0) return;
         importBrowserFiles(dropped).then(function (files) {

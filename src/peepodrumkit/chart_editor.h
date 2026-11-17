@@ -44,6 +44,8 @@ namespace PeepoDrumKit
 #ifdef __EMSCRIPTEN__
 	struct ChartEditor;
 	void WebRegisterChartEditorInstance(ChartEditor* instance);
+	void WebSetEmbeddedMode(b8 embedded);
+	void WebSetLanguage(std::string_view languageId, b8 hideLanguageMenu);
 #endif
 
 	struct ChartEditor
