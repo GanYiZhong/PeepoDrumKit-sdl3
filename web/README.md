@@ -65,6 +65,8 @@ Open the page, then use the editor like the desktop version:
 
 - **File → Open** (Ctrl+O) opens the browser's file picker. Select the `.tja` **together with its audio file** (and jacket): the files are
   copied into an in-memory folder so that the chart's `WAVE:` reference can be resolved. Dropping files onto the editor works the same way.
+  A browser page can't read the files next to the chart on its own, so if only the `.tja` was picked a banner
+  ("Audio file … not found — Choose audio file") lets you add the song afterwards. File name case and sub folders in `WAVE:` don't matter.
 - **File → Save / Save As** (Ctrl+S) downloads the chart as a UTF-8 `.tja` (or hands it to the host page, see below).
 - Click the editor once before using keyboard shortcuts; keys only go to the editor while its canvas has focus.
 
@@ -106,7 +108,8 @@ All functions live on `Module.pdk` (`web/pdk_api.js`):
 | `pdk.hasUnsavedChanges()` / `pdk.markSaved()` | Query / clear the editor's "unsaved changes" state. |
 | `pdk.newChart()`, `pdk.isLoading()`, `pdk.saveSettings()` | |
 | `pdk.onReady`, `pdk.onTitleChange = (title) => {}` | Optional callbacks. Without `onTitleChange` the editor sets `document.title`. |
-| `Module.pdkOptions` | Set before loading the script: `persistSettings`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle` (all default `true`). |
+| `pdk.onMissingAudio = (waveName) => {}` | A chart was opened without the audio file its `WAVE:` header refers to (answer with `pdk.loadAudio`). |
+| `Module.pdkOptions` | Set before loading the script: `persistSettings`, `warnOnUnload`, `handleFileDrop`, `setDocumentTitle`, `missingAudioPrompt` (all default `true`). |
 
 The same things are exported as plain C functions (`_pdk_web_open_chart`, `_pdk_web_get_tja`, …, see
 `src/peepodrumkit/chart_editor_web.cpp`) for anyone who prefers `ccall`.

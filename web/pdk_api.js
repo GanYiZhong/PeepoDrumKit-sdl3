@@ -116,6 +116,131 @@
   }
 
   // ------------------------------------------------------------------------------------------------------------------
+  // Resolving a chart's WAVE: reference
+  // A browser can't read the files next to a picked .tja, so the song only loads automatically when it was picked /
+  // dropped / passed in together with the chart. If it wasn't, a small banner offers to pick it afterwards.
+  // ------------------------------------------------------------------------------------------------------------------
+  function pathExists(path) { try { return FS.analyzePath(path).exists; } catch (e) { return false; } }
+  function baseNameKey(path) {
+    path = String(path).replace(/\\/g, "/");
+    return path.substring(path.lastIndexOf("/") + 1).normalize("NFC").toLowerCase();
+  }
+
+  var missingAudioBanner = null;
+  function hideMissingAudioBanner() {
+    if (missingAudioBanner && missingAudioBanner.parentNode) missingAudioBanner.parentNode.removeChild(missingAudioBanner);
+    missingAudioBanner = null;
+  }
+
+  // Runs the callback once the editor has finished loading the chart (relative paths are resolved against the loaded chart)
+  function whenNotLoading(callback) {
+    var attempts = 0;
+    (function poll() {
+      if (!Module._pdk_web_is_loading() || ++attempts > 600) callback();
+      else setTimeout(poll, 50);
+    })();
+  }
+
+  function loadAudioKeepingSavedState(path) {
+    whenNotLoading(function () {
+      var wasUnsaved = Module._pdk_web_has_unsaved_changes() === 1;
+      callWithString("pdk_web_load_audio", path);
+      if (!wasUnsaved) Module._pdk_web_mark_saved();
+    });
+  }
+
+  function showMissingAudioBanner(waveName, expectedPath) {
+    hideMissingAudioBanner();
+    if (typeof Module.pdk.onMissingAudio === "function") Module.pdk.onMissingAudio(waveName);
+    if (options.missingAudioPrompt === false) return;
+
+    var chinese = /^zh/i.test(navigator.language || "");
+    var canvas = Module.canvas || document.getElementById("canvas");
+    var rect = canvas ? canvas.getBoundingClientRect() : { top: 0, left: 0, width: window.innerWidth };
+
+    var banner = document.createElement("div");
+    banner.style.cssText = "position:fixed;z-index:1000;display:flex;gap:10px;align-items:center;max-width:90%;padding:8px 12px;" +
+      "background:#2b2b2b;color:#eee;border:1px solid #b58a2a;border-radius:6px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5);";
+    banner.style.top = (rect.top + 40) + "px";
+    banner.style.left = (rect.left + rect.width / 2) + "px";
+    banner.style.transform = "translateX(-50%)";
+
+    var text = document.createElement("span");
+    text.textContent = chinese
+      ? "找不到音檔「" + waveName + "」（瀏覽器無法自動讀取譜面旁邊的檔案）"
+      : "Audio file \"" + waveName + "\" not found (a browser can't read the files next to the chart)";
+    var pick = document.createElement("button");
+    pick.textContent = chinese ? "選擇音檔" : "Choose audio file";
+    var close = document.createElement("button");
+    close.textContent = "×";
+    close.setAttribute("aria-label", chinese ? "關閉" : "Dismiss");
+    [pick, close].forEach(function (button) {
+      button.style.cssText = "cursor:pointer;padding:4px 10px;border-radius:4px;border:1px solid #666;background:#3a3a3a;color:#eee;font:inherit;white-space:nowrap;";
+    });
+
+    pick.addEventListener("click", function () {
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = AUDIO_EXTENSIONS.map(function (e) { return "." + e; }).join(",");
+      input.addEventListener("change", function () {
+        var file = input.files && input.files[0];
+        if (!file) return;
+        file.arrayBuffer().then(function (buffer) {
+          var bytes = new Uint8Array(buffer);
+          hideMissingAudioBanner();
+          if (baseNameKey(file.name) === baseNameKey(waveName)) {
+            // The file the chart asked for: put it where the chart expects it, the chart itself stays unchanged
+            FS.mkdirTree(expectedPath.substring(0, expectedPath.lastIndexOf("/")));
+            FS.writeFile(expectedPath, bytes);
+            // (passed exactly as written in the chart so that its WAVE: header is left untouched)
+            loadAudioKeepingSavedState(waveName);
+          } else {
+            // A different file: the chart's WAVE: header is updated to it (and the chart marked as changed)
+            var pickedPath = writeWorkFile(file.name, bytes);
+            whenNotLoading(function () { callWithString("pdk_web_load_audio", pickedPath); });
+          }
+          if (canvas) canvas.focus();
+        });
+      });
+      input.click();
+    });
+    close.addEventListener("click", function () { hideMissingAudioBanner(); if (canvas) canvas.focus(); });
+
+    banner.appendChild(text); banner.appendChild(pick); banner.appendChild(close);
+    document.body.appendChild(banner);
+    missingAudioBanner = banner;
+  }
+
+  // Called after a chart file has been written to /work and before the editor starts loading it
+  function resolveChartAudio(tjaPath) {
+    hideMissingAudioBanner();
+    var waveName = findWaveName(decodeTJABytes(FS.readFile(tjaPath)));
+    if (!waveName) return;
+
+    var expectedPath = WORK_DIR + "/" + waveName.replace(/\\/g, "/");
+    if (pathExists(expectedPath)) return;
+
+    // The virtual file system is case sensitive and flat, unlike the folder the chart came from:
+    // accept "Song.OGG" for "song.ogg" and "song.ogg" for "audio/song.ogg" by linking it to the expected path
+    var wanted = baseNameKey(waveName);
+    var candidates = FS.readdir(WORK_DIR).filter(function (name) { return name !== "." && name !== ".." && baseNameKey(name) === wanted; });
+    if (candidates.length > 0) {
+      try {
+        FS.mkdirTree(expectedPath.substring(0, expectedPath.lastIndexOf("/")));
+        FS.symlink(WORK_DIR + "/" + candidates[0], expectedPath);
+        return;
+      } catch (e) { console.warn("[PeepoDrumKit] could not link the audio file", e); }
+    }
+    showMissingAudioBanner(waveName, expectedPath);
+  }
+
+  function afterBrowserFilesImported(primary) {
+    var extension = extensionOf(primary.name);
+    if (extension === "tja") resolveChartAudio(primary.path);
+    else if (AUDIO_EXTENSIONS.indexOf(extension) >= 0) hideMissingAudioBanner();
+  }
+
+  // ------------------------------------------------------------------------------------------------------------------
   // Hooks called from C++
   // ------------------------------------------------------------------------------------------------------------------
   Module.pdkInternal = {
@@ -152,7 +277,9 @@
       input.addEventListener("change", function () {
         if (!input.files || input.files.length === 0) { finish(null); return; }
         importBrowserFiles(input.files).then(function (files) {
-          finish(pickPrimaryFile(files, wanted).path);
+          var primary = pickPrimaryFile(files, wanted);
+          afterBrowserFilesImported(primary);
+          finish(primary.path);
         }, function (error) { console.error("[PeepoDrumKit] failed to read the selected files", error); finish(null); });
       });
       input.addEventListener("cancel", function () { finish(null); });
@@ -202,9 +329,11 @@
     /** Optional callbacks, assign functions to them:
      *    onReady(pdk)                called once after startup
      *    onSave(tjaText, fileName)   the user saved the chart (Ctrl+S / File > Save). If unset the chart is downloaded instead
+     *    onMissingAudio(waveName)    a chart was opened without the audio file its WAVE: header refers to
      *    onTitleChange(title)        the editor wants to change the window title (contains the chart name and a '*' if unsaved) */
     onReady: null,
     onSave: null,
+    onMissingAudio: null,
     onTitleChange: null,
 
     /** Opens a chart, optionally together with its song.
@@ -226,6 +355,7 @@
       if (chart.audio != null) writeWorkFile(chart.audioName || findWaveName(tjaText) || "song.ogg", toUint8Array(chart.audio));
 
       var tjaPath = writeWorkFile(tjaName, tjaBytes);
+      resolveChartAudio(tjaPath);
       callWithString("pdk_web_open_chart", tjaPath, [chart.discardUnsavedChanges === false ? 0 : 1]);
 
       // The chart's own WAVE: header wins when the names match; otherwise point the (now loading) chart at the given audio
@@ -320,6 +450,7 @@
         if (!dropped || dropped.length === 0) return;
         importBrowserFiles(dropped).then(function (files) {
           var primary = pickPrimaryFile(files, ["tja"].concat(AUDIO_EXTENSIONS, IMAGE_EXTENSIONS));
+          afterBrowserFilesImported(primary);
           callWithString("pdk_web_drop_file", primary.path);
         });
       }, true);
